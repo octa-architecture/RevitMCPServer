@@ -13,7 +13,7 @@ namespace RevitMCPAddin.Commands;
 ///                            (invalid_chars 400 / name_collision 409) and no grid is created.
 ///   - units: "meters"|"feet" optional, default "meters"
 /// </summary>
-public sealed class CreateGridCommand : IRevitCommand
+public sealed class CreateGridCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "create_grid";
     public bool IsReadOnly => false;
@@ -44,10 +44,18 @@ public sealed class CreateGridCommand : IRevitCommand
 
         var result = new JsonObject
         {
+            ["affected"] = Affected.Created(grid.Id.Value),
             ["id"] = grid.Id.Value,
             ["name"] = grid.Name,
             ["lengthFeet"] = line.Length,
         };
         return result;
+    }
+    /// <summary>The grid must exist under the requested label if one was given.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var want = P.StrOrNull(ctx.Parameters, "name");
+        return ReadBack.Created(ctx.RequireDoc(), result,
+            e => string.IsNullOrWhiteSpace(want) ? null : ReadBack.Text("name", want, e.Name));
     }
 }

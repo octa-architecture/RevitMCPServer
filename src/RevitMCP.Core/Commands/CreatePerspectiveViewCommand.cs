@@ -32,7 +32,7 @@ namespace RevitMCPAddin.Commands;
 /// forward echoed back in the REQUESTED units so a caller can verify placement
 /// without a unit round-trip of its own.
 /// </summary>
-public sealed class CreatePerspectiveViewCommand : IRevitCommand
+public sealed class CreatePerspectiveViewCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "create_perspective_view";
     public bool IsReadOnly => false;
@@ -126,7 +126,12 @@ public sealed class CreatePerspectiveViewCommand : IRevitCommand
             });
         }
 
-        return new JsonObject { ["views"] = views, ["units"] = units };
+        return new JsonObject
+        {
+            ["views"] = views,
+            ["units"] = units,
+            ["affected"] = Affected.Created(views.OfType<JsonObject>().Select(v => v["id"]!.GetValue<long>())),
+        };
     }
 
     private static JsonObject Vec(XYZ v, double scale) => new()
@@ -145,4 +150,12 @@ public sealed class CreatePerspectiveViewCommand : IRevitCommand
         _ => throw new RevitCommandException("invalid_parameter",
             $"detailLevel must be 'coarse', 'medium' or 'fine', got '{s}'."),
     };
+    /// <summary>Every view of the series must still exist, each under the name reported for it.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var names = (result["views"] as JsonArray ?? new JsonArray()).OfType<JsonObject>()
+            .ToDictionary(v => v["id"]!.GetValue<long>(), v => v["name"]?.GetValue<string>());
+        return ReadBack.Created(ctx.RequireDoc(), result,
+            e => names.TryGetValue(e.Id.Value, out var n) ? ReadBack.Text("name", n, e.Name) : null);
+    }
 }

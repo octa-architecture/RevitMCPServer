@@ -52,6 +52,7 @@ public sealed class CreateTextNoteCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(note.Id.Value),
             ["id"] = note.Id.Value,
             ["viewId"] = viewId.Value,
             ["text"] = text,

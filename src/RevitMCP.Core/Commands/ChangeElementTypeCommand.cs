@@ -11,7 +11,7 @@ namespace RevitMCPAddin.Commands;
 ///   - id:     long, required — ElementId of the element to change.
 ///   - typeId: long, required — ElementId of the target type (WallType, FloorType, FamilySymbol, …).
 /// </summary>
-public sealed class ChangeElementTypeCommand : IRevitCommand
+public sealed class ChangeElementTypeCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "change_element_type";
     public bool IsReadOnly => false;
@@ -47,11 +47,23 @@ public sealed class ChangeElementTypeCommand : IRevitCommand
         return new JsonObject
         {
             ["id"]          = idValue,
+            ["affected"]    = Affected.Modified(idValue),
             ["oldTypeId"]   = oldTypeId.Value,
             ["oldTypeName"] = oldTypeName,
             ["newTypeId"]   = typeIdValue,
             ["newTypeName"] = newType.Name,
             ["changeSummary"] = $"Changed element {idValue} type: '{oldTypeName}' → '{newType.Name}'",
         };
+    }
+    /// <summary>The element's type id must now be the requested type.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var doc = ctx.RequireDoc();
+        var id = P.Long(ctx.Parameters, "id");
+        var want = P.Long(ctx.Parameters, "typeId");
+        var el = doc.GetElement(new ElementId(id));
+        if (el is null) return VerifyResult.Fail($"element {id} no longer exists after commit");
+        var got = el.GetTypeId().Value;
+        return got == want ? VerifyResult.Pass() : VerifyResult.Fail($"type: expected id {want}, stored id {got}");
     }
 }

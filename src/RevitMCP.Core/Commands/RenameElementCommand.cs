@@ -20,7 +20,7 @@ namespace RevitMCPAddin.Commands;
 ///
 /// Returns <c>changeSummary</c> and <c>changes</c> for structured diffs.
 /// </summary>
-public sealed class RenameElementCommand : IRevitCommand
+public sealed class RenameElementCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "rename_element";
     public bool IsReadOnly => false;
@@ -144,6 +144,7 @@ public sealed class RenameElementCommand : IRevitCommand
         return new JsonObject
         {
             ["id"] = view.Id.Value,
+            ["affected"] = Affected.Modified(view.Id.Value),
             ["elementType"] = view.GetType().Name,
             ["oldName"] = oldName,
             ["newName"] = view.Name,
@@ -168,6 +169,7 @@ public sealed class RenameElementCommand : IRevitCommand
         return new JsonObject
         {
             ["id"] = element.Id.Value,
+            ["affected"] = Affected.Modified(element.Id.Value),
             ["elementType"] = element.GetType().Name,
             ["oldName"] = oldName,
             ["newName"] = element.Name,
@@ -201,6 +203,7 @@ public sealed class RenameElementCommand : IRevitCommand
         return new JsonObject
         {
             ["id"] = id.Value,
+            ["affected"] = Affected.Modified(id.Value),
             ["elementType"] = elementType,
             ["oldName"] = oldName,
             ["newName"] = newName,
@@ -212,5 +215,18 @@ public sealed class RenameElementCommand : IRevitCommand
             },
             ["changeSummary"] = $"Renamed {elementType} {id.Value}: '{oldName}' → '{newName}' ({instanceCount} instances affected)",
         };
+    }
+    /// <summary>The stored name must equal the requested one (a room is compared on its Name parameter).</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var doc = ctx.RequireDoc();
+        var id = P.Long(ctx.Parameters, "id");
+        var el = doc.GetElement(new ElementId(id));
+        if (el is null) return VerifyResult.Fail($"element {id} no longer exists after commit");
+        var stored = el is Autodesk.Revit.DB.Architecture.Room room
+            ? room.get_Parameter(BuiltInParameter.ROOM_NAME)?.AsString()
+            : el.Name;
+        var m = ReadBack.Text("name", P.Str(ctx.Parameters, "name"), stored);
+        return m is null ? VerifyResult.Pass() : VerifyResult.Fail(m);
     }
 }

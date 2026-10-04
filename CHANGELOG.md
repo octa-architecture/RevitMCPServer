@@ -4,6 +4,112 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.40] — 2026-10-04: server-side write gates — audit log, read-back after commit, trace hooks, optional approval mode
+
+All additive: the envelope, `ok`, HTTP status codes, every existing field, `IRevitCommand` and the
+command-pack surface are unchanged. A client that ignores the new fields behaves exactly as before.
+The approval mode is opt-in; only when it is switched on do writes without a token get 428/409.
+
+### Added
+
+- **Audit log, one JSON line per command, in the add-in's dispatcher** — so it covers every client,
+  stdio and direct HTTP alike. `%APPDATA%\RevitMCP\audit\audit-YYYY-MM-DD.jsonl` (UTC day). A batch
+  writes a line per step plus a summary line sharing `batchId`. Fields: `ts, id, revit, docHash,
+  command, kind, batchId, step, dryRun, ok, errorCode, durationMs, paramsHash, affected, verify,
+  client, trace`.
+  - Private by default: params only as a SHA-256 of their canonical JSON, the document only as a hash
+    of its path; in hash mode the read-back `detail` is dropped too, since a mismatch message quotes
+    values. `logParams: "redacted"` keeps keys and non-string values; `"full"` keeps everything.
+  - Reads are skipped unless `includeReads: true`.
+  - Fail-open: a write error never touches the command's result; it is printed once and shown on
+    `GET /health` as `audit: { enabled, lastError }`.
+  - Configured by `revit-mcp-audit.json` next to the token file; no file means audit on, writes only,
+    params hashed. A bad value falls back to its default and is reported, never disabling the add-in.
+- **Read-back after commit: `data.verify = { status, detail }`.** After a write commits (never on a
+  dry-run) the dispatcher asks the command to re-read the model, through the new optional
+  `IVerifiableCommand`, or falls back to an existence check of the new canonical
+  `data.affected = { created, modified, deleted }`. Without either, `status` is `not_supported`.
+  - Implemented for 35 commands: parameter writes (`set_parameter`, `set_parameter_batch`,
+    `copy_parameters`, `import_parameters`, `update_where`, `rename_element`) compare the stored
+    value after the same unit conversion the write used; `change_element_type`, `move_element`,
+    `rotate_element`, `mirror_element`, `set_level_elevation` compare type, location (anchor point
+    moved by the requested translation, rotation or reflection) and elevation; all `create_*`,
+    `place_family_instance`, `copy_element`, `duplicate_view`, `delete_elements` check that what was
+    created exists (plus name, number, level, length or type where the command has one) and what
+    was deleted is gone.
+  - A transaction Revit did not commit is reported as `failed` whatever the command returned.
+  - Batches: every step is read back. A failure on an element that a later step of the same batch
+    changed again is reported as `skipped`, naming that step, instead of a false `failed`.
+  - Default: report only — `ok` stays `true` because the change is committed. Strict mode
+    (`"verifyFailure": "error"`): a single command returns `verify_failed` with its data attached and
+    a message saying the model was committed; a batch reads back before committing, inside the same
+    transaction, and rolls back whole on any failure (still one undo step).
+  - Previously only `update_where` re-read what it wrote, and only inside its transaction;
+    `set_parameter` could report `ok: true` with `written: false`.
+- **Trace hooks for evaluation harnesses.** The add-in accepts optional `X-MCP-Client` (≤64) and
+  `X-MCP-Trace` (≤128) headers on `/mcp` and `/mcp/batch` and records them in the audit log. The Node
+  bridge sends them from `REVIT_MCP_CLIENT` / `REVIT_MCP_TRACE_ID`, and with `REVIT_MCP_TRACE_FILE`
+  appends one line per MCP tool call: `ts, tool, durationMs, ok, errorCode, reqBytes, respBytes,
+  trace`. `respBytes` stands in for tokens on the server side.
+- Command packs can implement `IVerifiableCommand` too; a pack command that reports `data.affected`
+  gets the existence check for free.
+- **Optional preview-before-write mode (off by default).** With no setting, or
+  `"mutationMode": "direct"`, nothing changes.
+  - **`"mutationMode": "preview_required"`** in `revit-mcp-audit.json`. A model write — a `ModelWrite`
+    command, or a batch containing one — then runs only with the `approvalToken` returned by a dry-run
+    of the same request:
+    - A successful dry-run returns `approvalToken` and `approvalExpiresAt` (single command: in `data`;
+      batch: at the top level, beside `results`). A failed dry-run returns none.
+    - The write sends the token as a top-level body field next to `params` / `steps`, never inside
+      `params`.
+    - No token → HTTP 428 `approval_required`. An unknown, used or expired token, or one issued for a
+      different request → HTTP 409 `approval_mismatch`; a mismatch does not use the token up, so the
+      request that was previewed can still go through.
+    - Tokens are random, single-use, valid for 300 seconds, held in memory (a Revit restart clears
+      them) and bound to the command, the exact params (for a batch: steps, their order and
+      `stopOnError`) and the active document. They are checked and consumed on the Revit thread.
+    - Read-only and UI-action commands are never gated.
+  - `GET /health` reports `mutationMode`.
+  - Audit lines gain `approval: {state, token}` (`issued`, `consumed`, `required`, `mismatch`; `token`
+    is a 16-character fingerprint that links a dry-run to the write it approved — the token itself is
+    never written). `null` when no approval was involved.
+  - MCP bridge: every tool with `dryRun`, and `revit_batch`, also accepts `approvalToken` and forwards
+    it.
+
+### Verified
+
+- Live on Revit 2027 (Snowdon Architectural):
+  - Default mode 28/28 — reads leave no audit line; a write leaves exactly one with every field;
+    the audit file contains neither a sample param value nor the document title; a dry-run is logged
+    with `dryRun: true` and no read-back; a 3-step batch writes 3 step lines + 1 summary, and its
+    step overwritten by a later step reads `skipped`; 25 phase-1 calls all `passed`; a length
+    parameter set in metres and in feet both `passed`; a computed type parameter is refused before
+    any write; a move in metres is checked in feet; deleting an id twice gives `passed` then a 404
+    recorded in the audit; a command whose read-back fails returns `ok: true, verify: failed` and the
+    change stays.
+  - Strict mode 12/12 — the same failure returns `verify_failed` (committed, ids returned); a batch
+    containing it rolls back with the level count unchanged; a clean batch still commits;
+    `includeReads` logs a read.
+  - Unwritable audit folder — the write still returns 200 and `/health.audit.lastError` names the
+    error.
+  - Bridge end to end 8/8 — one trace line per tool call, a failed call carries `not_found`, and the
+    add-in's audit line has the same trace id and client.
+  - Model counts back to baseline after every run.
+- Approval mode, live on Revit 2027 in `preview_required`, 35/35 checks:
+  - reads, UI actions and read-only batches pass without a token;
+  - a write without a token → 428 and the model is unchanged;
+  - dry-run → token valid for 300 s, model unchanged;
+  - the token with changed params → 409, then with the previewed params → 200 with read-back passed;
+  - reusing it, or a forged token → 409; a token inside `params` is not accepted;
+  - batches: a different `stopOnError` or fewer steps → 409, the previewed batch → committed;
+    `POST /mcp {command:"batch"}` behaves the same;
+  - the audit file links dry-run and write by fingerprint and never contains a token.
+- Approval mode through the stdio bridge, 8/8: 50 write tools and `revit_batch` expose `approvalToken`, read tools
+  do not, and the dry-run → token → write flow works for a single command and a batch.
+- Default `direct` mode on Revit 2027 after the approval mode was added: the audit and read-back
+  checks above still pass; a dry-run returns no token and a stray token is ignored.
+- 254 C# tests (54 new), 36 TS tests (12 new).
+
 ## [0.8.39] — 2026-10-02: the last name-taking commands follow the same rule; `delete_elements` names missing ids
 
 ### Changed

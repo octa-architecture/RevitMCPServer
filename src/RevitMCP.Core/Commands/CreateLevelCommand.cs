@@ -12,7 +12,7 @@ namespace RevitMCPAddin.Commands;
 ///                name_collision 409 for a name another level has) and no level is created.
 ///   - units:     "meters"|"feet"
 /// </summary>
-public sealed class CreateLevelCommand : IRevitCommand
+public sealed class CreateLevelCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "create_level";
     public bool IsReadOnly => false;
@@ -36,9 +36,19 @@ public sealed class CreateLevelCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(level.Id.Value),
             ["id"] = level.Id.Value,
             ["elevationFeet"] = elevation,
             ["name"] = level.Name,
         };
+    }
+    /// <summary>The level must exist at the requested elevation, under the requested name if one was given.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var wantName = P.StrOrNull(ctx.Parameters, "name");
+        var wantFt = result["elevationFeet"]!.GetValue<double>();
+        return ReadBack.Created(ctx.RequireDoc(), result,
+            e => ReadBack.Number("elevation", wantFt, ((Level)e).Elevation, 1e-5, "ft"),
+            e => string.IsNullOrWhiteSpace(wantName) ? null : ReadBack.Text("name", wantName, e.Name));
     }
 }

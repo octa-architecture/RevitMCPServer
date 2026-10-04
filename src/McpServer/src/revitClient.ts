@@ -11,6 +11,7 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "node:crypto";
+import { traceHeaders } from "./trace.js";
 
 // The addin's HttpListener is hard-bound to http://127.0.0.1:<port>/, so a
 // non-loopback REVIT_MCP_HOST can never reach a real addin — the only thing it
@@ -41,6 +42,9 @@ export interface RevitEnvelope {
   // Dry-run responses:
   dryRun?: boolean;
   committed?: boolean;
+  // Dry-run of a batch in preview_required mode (a single command carries it in data):
+  approvalToken?: string;
+  approvalExpiresAt?: string;
   // Batch responses also carry these:
   count?: number;
   hadFailures?: boolean;
@@ -103,7 +107,7 @@ async function postJson(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const headers = buildHeaders();
+    const headers = { ...buildHeaders(), ...traceHeaders() };
     headers["x-request-id"] = randomUUID();
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
@@ -151,13 +155,17 @@ async function postJson(
   }
 }
 
+// approvalToken (preview_required mode): sent beside dryRun, never inside params — the token is
+// bound to the exact params of the dry-run that issued it.
 export function callRevit(
   command: string,
   params: Record<string, unknown>,
   dryRun = false,
+  approvalToken?: string,
 ): Promise<RevitEnvelope> {
   const body: Record<string, unknown> = { command, params };
   if (dryRun) body.dryRun = true;
+  if (approvalToken) body.approvalToken = approvalToken;
   return postJson("/mcp", body);
 }
 
@@ -165,9 +173,11 @@ export function callRevitBatch(
   steps: BatchStep[],
   stopOnError = true,
   dryRun = false,
+  approvalToken?: string,
 ): Promise<RevitEnvelope> {
   const body: Record<string, unknown> = { stopOnError, steps };
   if (dryRun) body.dryRun = true;
+  if (approvalToken) body.approvalToken = approvalToken;
   return postJson("/mcp/batch", body);
 }
 

@@ -12,7 +12,7 @@ namespace RevitMCPAddin.Commands;
 ///   - viewName:  string, optional (renames after creation). Applied exactly, or the command
 ///                fails (invalid_chars 400 / name_collision 409) and nothing is created.
 /// </summary>
-public sealed class CreateFloorPlanViewCommand : IRevitCommand
+public sealed class CreateFloorPlanViewCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "create_floor_plan_view";
     public bool IsReadOnly => false;
@@ -35,6 +35,7 @@ public sealed class CreateFloorPlanViewCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(view.Id.Value),
             ["id"] = view.Id.Value,
             ["name"] = view.Name,
             ["viewType"] = view.ViewType.ToString(),
@@ -51,4 +52,8 @@ public sealed class CreateFloorPlanViewCommand : IRevitCommand
             ?? throw new RevitCommandException("not_found",
                 $"No ViewFamilyType for {family} found.");
     }
+    /// <summary>The view must still exist after the commit, under the name the command reported.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result) =>
+        ReadBack.Created(ctx.RequireDoc(), result,
+            e => ReadBack.Text("name", result["name"]?.GetValue<string>() ?? e.Name, e.Name));
 }

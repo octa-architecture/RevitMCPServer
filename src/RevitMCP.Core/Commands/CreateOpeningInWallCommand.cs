@@ -34,6 +34,7 @@ public sealed class CreateOpeningInWallCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(opening.Id.Value),
             ["openingId"] = opening.Id.Value,
             ["wallId"] = wallId.Value,
         };

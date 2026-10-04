@@ -13,7 +13,7 @@ namespace RevitMCPAddin.Commands;
 ///   - units:     "meters"|"feet"|"mm"|"internal", optional. Default "meters".
 ///                "internal" = Revit internal units (feet).
 /// </summary>
-public sealed class SetLevelElevationCommand : IRevitCommand
+public sealed class SetLevelElevationCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "set_level_elevation";
     public bool IsReadOnly => false;
@@ -51,6 +51,7 @@ public sealed class SetLevelElevationCommand : IRevitCommand
         return new JsonObject
         {
             ["id"]             = idValue,
+            ["affected"]       = Affected.Modified(idValue),
             ["name"]           = level.Name,
             ["oldElevationM"]  = Math.Round(oldM,  4),
             ["newElevationM"]  = Math.Round(newM,  4),
@@ -58,5 +59,16 @@ public sealed class SetLevelElevationCommand : IRevitCommand
             ["newElevationFt"] = Math.Round(elevationFt, 6),
             ["changeSummary"]  = $"Level '{level.Name}' elevation: {oldM:F3} m → {newM:F3} m",
         };
+    }
+    /// <summary>The level's stored elevation must equal the requested one (feet, after unit conversion).</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var doc = ctx.RequireDoc();
+        var id = result["id"]!.GetValue<long>();
+        if (doc.GetElement(new ElementId(id)) is not Level level)
+            return VerifyResult.Fail($"level {id} no longer exists after commit");
+        var want = result["newElevationFt"]!.GetValue<double>();
+        var m = ReadBack.Number("elevation", want, level.Elevation, 1e-5, "ft");
+        return m is null ? VerifyResult.Pass() : VerifyResult.Fail(m);
     }
 }

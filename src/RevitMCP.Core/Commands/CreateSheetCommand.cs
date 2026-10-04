@@ -14,7 +14,7 @@ namespace RevitMCPAddin.Commands;
 ///   - sheetName:   string, optional. Same contract (invalid_chars 400).
 ///   - titleBlockName: string, optional (defaults to first loaded title block family type)
 /// </summary>
-public sealed class CreateSheetCommand : IRevitCommand
+public sealed class CreateSheetCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "create_sheet";
     public bool IsReadOnly => false;
@@ -42,6 +42,7 @@ public sealed class CreateSheetCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(sheet.Id.Value),
             ["id"] = sheet.Id.Value,
             ["sheetNumber"] = sheet.SheetNumber,
             ["name"] = sheet.Name,
@@ -60,4 +61,9 @@ public sealed class CreateSheetCommand : IRevitCommand
 
         return query.FirstOrDefault();
     }
+    /// <summary>The sheet must exist with the number and name the command reported.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result) =>
+        ReadBack.Created(ctx.RequireDoc(), result,
+            e => ReadBack.Text("sheetNumber", result["sheetNumber"]?.GetValue<string>(), ((ViewSheet)e).SheetNumber),
+            e => ReadBack.Text("name", result["name"]?.GetValue<string>(), e.Name));
 }

@@ -16,7 +16,7 @@ namespace RevitMCPAddin.Commands;
 ///   - structural:   bool             optional, default false
 ///   - units:        "meters"|"feet"  optional, default "meters"
 /// </summary>
-public sealed class CreateWallCommand : IRevitCommand
+public sealed class CreateWallCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "create_wall";
     public bool IsReadOnly => false;
@@ -55,6 +55,7 @@ public sealed class CreateWallCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(created.Id.Value),
             ["id"] = created.Id.Value,
             ["levelName"] = level.Name,
             ["wallTypeName"] = wallType.Name,
@@ -85,5 +86,15 @@ public sealed class CreateWallCommand : IRevitCommand
         }
         return query.FirstOrDefault(w => w.Name == name)
             ?? throw new RevitCommandException("not_found", $"WallType '{name}' not found.");
+    }
+    /// <summary>The wall must exist on the reported level with the reported baseline length.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var doc = ctx.RequireDoc();
+        var wantLen = result["lengthFeet"]!.GetValue<double>();
+        var wantLevel = result["levelName"]?.GetValue<string>();
+        return ReadBack.Created(doc, result,
+            e => e.Location is LocationCurve lc ? ReadBack.Number("length", wantLen, lc.Curve.Length, ReadBack.LengthTolFt, "ft") : "wall has no location curve",
+            e => ReadBack.Text("level", wantLevel, doc.GetElement(e.LevelId)?.Name));
     }
 }

@@ -34,6 +34,7 @@ public sealed class App : IExternalApplication
     private RevitMCPExternalEventHandler? _handler;
     private ExternalEvent? _externalEvent;
     private McpHttpServer? _httpServer;
+    private AuditLog? _audit;
     private AutoAuditPanelView? _panelView;
     private AutoAuditPanelView? _extraPanelView;
 
@@ -58,13 +59,29 @@ public sealed class App : IExternalApplication
             }
 
             _handler = new RevitMCPExternalEventHandler(registry);
+
+            // Write gates: per-command audit JSONL + read-back policy (revit-mcp-audit.json,
+            // defaults when absent). A bad setting falls back to its default; audit write
+            // failures never affect commands (fail-open, reported on /health).
+            var auditSettings = AuditConfig.Load(revitVersion);
+            foreach (var err in auditSettings.Errors) LogToConsole($"[RevitMCP] Audit config: {err}");
+            _audit = new AuditLog(auditSettings, LogToConsole);
+            _handler.ConfigureWriteGates(_audit.Enabled ? _audit : null,
+                new WriteGateOptions { VerifyFailure = auditSettings.VerifyFailure, Mutation = auditSettings.MutationMode });
+            LogToConsole(_audit.Enabled
+                ? $"[RevitMCP] Audit ON → {auditSettings.Directory} (params: {auditSettings.LogParams}, " +
+                  $"reads: {auditSettings.IncludeReads}, verifyFailure: {auditSettings.VerifyFailure})"
+                : "[RevitMCP] Audit OFF (revit-mcp-audit.json)");
+            if (auditSettings.MutationMode == MutationMode.PreviewRequired)
+                LogToConsole("[RevitMCP] mutationMode: preview_required — model writes need the approvalToken " +
+                             "from a dry-run of the same request");
             _externalEvent = ExternalEvent.Create(_handler);
             _handler.AttachExternalEvent(_externalEvent);
 
             var port = ResolvePort(revitVersion);
             var authToken = ResolveAuthToken(revitVersion);
 
-            _httpServer = new McpHttpServer(port, _handler, authToken);
+            _httpServer = new McpHttpServer(port, _handler, authToken, _audit);
             _httpServer.Start();
 
             // Log the actual build so the Revit journal / DebugView shows which dll

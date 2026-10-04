@@ -13,7 +13,7 @@ The MCP tool name is the command name with the `revit_` prefix.
 The HTTP command name is the name without the prefix (used in
 `POST /mcp` `command` field and inside `revit_batch` steps).
 
-> **v0.8.39 — 91 commands + 1 batch + 2 recipes = 94 MCP tools** (1 hidden: `create_spot_elevation`; 92 C# commands registered; workflow recipes are Node-only; opt-in command packs can add HTTP-only commands at run time).
+> **v0.8.40 — 91 commands + 1 batch + 2 recipes = 94 MCP tools** (1 hidden: `create_spot_elevation`; 92 C# commands registered; workflow recipes are Node-only; opt-in command packs can add HTTP-only commands at run time).
 >
 > **Pagination:** `list_elements` and `find_elements` accept `offset` (default 0) +
 > `limit` (default 200, max 5000) and return `total`, `hasMore`, and `nextOffset`.
@@ -821,8 +821,44 @@ and reports `hadFailures: true`.
 ### `GET /health`
 Auth-exempt; no active document required. Returns `ok`, `service`, `version`, the git stamp
 (`gitCommit`, `gitBranch`, `gitState`, `buildTimestampUtc`), `commandCount` (everything registered)
-split into `builtinCommandCount` and `packCommandCount`, `capabilityHash` and `authEnabled`. Pack
-names are deliberately not listed here — see `GET /commands`.
+split into `builtinCommandCount` and `packCommandCount`, `capabilityHash`, `authEnabled`,
+`mutationMode` (`direct` | `preview_required`), and `audit: { enabled, lastError }` — an audit-log
+write failure never fails a command and surfaces here instead. Pack names are deliberately not listed here — see `GET /commands`.
+
+### Write gates (all write commands)
+
+Additive fields on a committed write (never on a dry-run):
+
+- `data.verify = { status, detail }` — the add-in's read-back after the commit. `status` is
+  `passed`, `failed`, `skipped` (the check could not run, or a later step of the same batch changed
+  that element again) or `not_supported` (the command has no read-back and reports no
+  `data.affected`). Default: reported only, `ok` stays `true`. Strict mode
+  (`"verifyFailure": "error"` in `revit-mcp-audit.json`): a single command returns `verify_failed`
+  with the data still attached and a message saying the model was committed; a batch verifies before
+  committing and, on any failure, rolls back and returns `verify_failed` with `committed: false`.
+- `data.affected = { created: long[], modified: long[], deleted: long[] }` — which elements the
+  command touched. Existing keys (`id`, `newIds`, `deletedIds`…) are unchanged.
+
+Optional request headers on `POST /mcp` and `POST /mcp/batch`, copied into the audit log:
+`X-MCP-Client` (≤64 characters) and `X-MCP-Trace` (≤128 characters). Longer values are cut; they never
+cause a request to be rejected.
+
+**Preview before write** (only with `"mutationMode": "preview_required"` in `revit-mcp-audit.json`;
+default `direct` changes nothing). A model write — a `ModelWrite` command, or a batch containing one —
+needs the `approvalToken` from a dry-run of the same request, sent as a top-level body field beside
+`params` / `steps` (not inside `params`):
+
+| Request | Result |
+|---|---|
+| dry-run, succeeds | `approvalToken` + `approvalExpiresAt` (single command: in `data`; batch: top level, beside `results`) |
+| dry-run, fails | no token |
+| write without `approvalToken` | **428** `approval_required` |
+| unknown, used or expired token | **409** `approval_mismatch` |
+| token from a different request (command, params, batch steps or order, `stopOnError`, active document) | **409** `approval_mismatch`; the token stays valid for the request it was issued for |
+| matching token | runs normally; the token is used up |
+
+Tokens are random, single-use, valid 300 s and held in memory (a Revit restart clears them).
+Read-only and UI-action commands are never gated.
 
 ### `GET /commands`
 Lists every registered command with `isReadOnly` flag, `riskLevel`

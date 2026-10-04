@@ -20,7 +20,7 @@ namespace RevitMCPAddin.Commands;
 ///   - set:       { parameter, value, units?, scope? }, required.
 ///   - atomic:    bool, default true (roll back everything if any verify fails).
 /// </summary>
-public sealed class UpdateWhereCommand : IRevitCommand
+public sealed class UpdateWhereCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "update_where";
     public bool IsReadOnly => false;
@@ -97,6 +97,7 @@ public sealed class UpdateWhereCommand : IRevitCommand
         var results = new JsonArray();
         var applied = 0;
         var failedCount = 0;
+        var writtenIds = new List<long>();
 
         foreach (var (write, subject) in targets)
         {
@@ -121,7 +122,7 @@ public sealed class UpdateWhereCommand : IRevitCommand
                 row["ok"] = ok;
                 row["before"] = before;
                 row["after"] = after;
-                if (ok) applied++; else { failedCount++; row["reason"] = "verify_mismatch"; }
+                if (ok) { applied++; writtenIds.Add(write.Id.Value); } else { failedCount++; row["reason"] = "verify_mismatch"; }
             }
             catch (Exception ex)
             {
@@ -145,6 +146,7 @@ public sealed class UpdateWhereCommand : IRevitCommand
             ["affectedInstances"] = affectedInstances,
             ["applied"] = applied,
             ["failed"] = failedCount,
+            ["affected"] = Affected.Modified(writtenIds),
             ["atomic"] = atomic,
             ["warnings"] = warnings,
             ["results"] = results,
@@ -183,6 +185,31 @@ public sealed class UpdateWhereCommand : IRevitCommand
                 throw new RevitCommandException("invalid_parameter",
                     $"Unsupported StorageType '{param.StorageType}'.");
         }
+    }
+
+    /// <summary>
+    /// The per-row check above runs inside the transaction; this repeats it after the commit on every
+    /// element written (the type element for type parameters), so commit-time changes show up too.
+    /// </summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var doc = ctx.RequireDoc();
+        var setObj = ctx.Parameters["set"] as JsonObject;
+        var paramName = result["setParameter"]?.GetValue<string>();
+        if (setObj is null || paramName is null) return VerifyResult.Skip("could not recover the written parameter");
+        var value = setObj["value"] ?? setObj["Value"] ?? setObj[paramName];
+        if (value is null) return VerifyResult.Skip("could not recover the written value");
+        var units = WhereSupport.StrAny(setObj, "units", "unit") ?? "internal";
+        var ids = Affected.Read(result["affected"]).Modified;
+        var mismatches = new List<string>();
+        foreach (var id in ids)
+        {
+            var param = doc.GetElement(new ElementId(id))?.LookupParameter(paramName);
+            if (param is null) { mismatches.Add($"{id}: element or parameter missing after commit"); continue; }
+            if (!VerifyWritten(param, value, units))
+                mismatches.Add($"{id}: {paramName} stored '{SafeValueString(param)}'");
+        }
+        return ReadBack.FromMismatches(mismatches, $"{ids.Length} written element(s) re-read");
     }
 
     private static bool VerifyWritten(Parameter param, JsonNode value, string units)

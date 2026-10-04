@@ -17,7 +17,7 @@ namespace RevitMCPAddin.Commands;
 ///                 (if omitted, no fields are added — use Revit UI to configure). Names that match
 ///                 no schedulable field are reported in <c>skippedFields</c>, not silently dropped.
 /// </summary>
-public sealed class CreateScheduleCommand : IRevitCommand
+public sealed class CreateScheduleCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "create_schedule";
     public bool IsReadOnly => false;
@@ -70,6 +70,7 @@ public sealed class CreateScheduleCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(schedule.Id.Value),
             ["id"] = schedule.Id.Value,
             ["name"] = schedule.Name,
             ["category"] = catName,
@@ -77,4 +78,8 @@ public sealed class CreateScheduleCommand : IRevitCommand
             ["skippedFields"] = skippedFields,
         };
     }
+    /// <summary>The view must still exist after the commit, under the name the command reported.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result) =>
+        ReadBack.Created(ctx.RequireDoc(), result,
+            e => ReadBack.Text("name", result["name"]?.GetValue<string>() ?? e.Name, e.Name));
 }

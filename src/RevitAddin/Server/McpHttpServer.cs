@@ -42,16 +42,19 @@ public sealed class McpHttpServer
     private readonly int _port;
     private readonly RevitMCPExternalEventHandler _handler;
     private readonly string? _authToken;
+    private readonly AuditLog? _audit;
     private readonly HttpListener _listener = new();
     private readonly ServerMetrics _metrics = new();
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
 
-    public McpHttpServer(int port, RevitMCPExternalEventHandler handler, string? authToken = null)
+    public McpHttpServer(int port, RevitMCPExternalEventHandler handler, string? authToken = null,
+        AuditLog? audit = null)
     {
         _port = port;
         _handler = handler;
         _authToken = authToken;
+        _audit = audit;
         _listener.Prefixes.Add($"http://127.0.0.1:{_port}/");
     }
 
@@ -131,6 +134,14 @@ public sealed class McpHttpServer
                     ["packCommandCount"] = _handler.Registry.PackCommandCount,
                     ["capabilityHash"] = BuildInfo.CapabilityHash(names),
                     ["authEnabled"] = _authToken is not null,
+                    // "preview_required": model writes need the approvalToken from a dry-run first.
+                    ["mutationMode"] = _handler.MutationMode == MutationMode.PreviewRequired ? "preview_required" : "direct",
+                    // Audit write failures never fail a command; this is where they show up.
+                    ["audit"] = new JsonObject
+                    {
+                        ["enabled"] = _audit?.Enabled ?? false,
+                        ["lastError"] = _audit?.LastError,
+                    },
                 }).ConfigureAwait(false);
                 return;
             }
@@ -211,10 +222,12 @@ public sealed class McpHttpServer
                 var sw = Stopwatch.StartNew();
                 try
                 {
+                    var meta = new RequestMeta(requestId,
+                        Header(request, "X-MCP-Client", 64), Header(request, "X-MCP-Trace", 128));
                     if (path == "/mcp")
-                        await HandleSingleAsync(request, response).ConfigureAwait(false);
+                        await HandleSingleAsync(request, response, meta).ConfigureAwait(false);
                     else
-                        await HandleBatchAsync(request, response).ConfigureAwait(false);
+                        await HandleBatchAsync(request, response, meta).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -293,7 +306,9 @@ public sealed class McpHttpServer
             "unknown_command" or "not_found"      => 404,
             "timeout" or "cancelled"              => 408,
             "name_collision" or "system_family"
-              or "ambiguous_selection"            => 409,
+              or "ambiguous_selection"
+              or "approval_mismatch"              => 409,
+            "approval_required"                   => 428,
             "payload_too_large"                   => 413,
             "overloaded"                          => 503,
             // command_failed / step_failed / dispatch_failed / server_error /
@@ -314,7 +329,34 @@ public sealed class McpHttpServer
         return body?["dryRun"]?.GetValue<bool>() ?? false;
     }
 
-    private async Task HandleSingleAsync(HttpListenerRequest request, HttpListenerResponse response)
+    /// <summary>
+    /// Optional caller-supplied label for the audit log: trimmed, control characters removed, cut to
+    /// <paramref name="max"/> characters. Absent or empty → null. Never rejects a request.
+    /// </summary>
+    internal static string? Header(HttpListenerRequest request, string name, int max) =>
+        CleanHeader(request.Headers[name], max);
+
+    /// <summary>
+    /// The approval token of a write in preview_required mode: top-level <c>approvalToken</c> in the
+    /// body, beside <c>dryRun</c> — never inside <c>params</c>, which the token is bound to.
+    /// </summary>
+    internal static RequestMeta WithApproval(RequestMeta meta, JsonObject body)
+    {
+        var raw = body["approvalToken"] is JsonValue v && v.TryGetValue<string>(out var t) ? t : null;
+        var token = CleanHeader(raw, 128);
+        return token is null ? meta : meta with { ApprovalToken = token };
+    }
+
+    internal static string? CleanHeader(string? raw, int max)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var clean = new string(raw!.Trim().Where(c => !char.IsControl(c)).ToArray());
+        if (clean.Length == 0) return null;
+        return clean.Length <= max ? clean : clean.Substring(0, max);
+    }
+
+    private async Task HandleSingleAsync(HttpListenerRequest request, HttpListenerResponse response,
+        RequestMeta meta)
     {
         var envelope = await ReadJsonObjectAsync(request, response).ConfigureAwait(false);
         if (envelope is null) return;
@@ -331,6 +373,7 @@ public sealed class McpHttpServer
         var commandName = cmdNode.GetValue<string>();
         var parameters = envelope["params"] as JsonObject;
         var dryRun = ParseDryRun(request, envelope);
+        meta = WithApproval(meta, envelope);
 
         // "batch" is not a registered IRevitCommand — it is a transport-level
         // dispatch primitive.  When a client posts  POST /mcp {command:"batch"}
@@ -340,14 +383,14 @@ public sealed class McpHttpServer
         // equivalent.  This closes the stdio ↔ HTTP parity gap.
         if (string.Equals(commandName, "batch", StringComparison.OrdinalIgnoreCase))
         {
-            await HandleSingleAsBatchAsync(request, response, parameters, dryRun).ConfigureAwait(false);
+            await HandleSingleAsBatchAsync(request, response, parameters, dryRun, meta).ConfigureAwait(false);
             return;
         }
 
         JsonObject result;
         try
         {
-            result = await _handler.EnqueueAsync(commandName, parameters, dryRun).ConfigureAwait(false);
+            result = await _handler.EnqueueAsync(commandName, parameters, dryRun, meta).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -367,7 +410,8 @@ public sealed class McpHttpServer
         HttpListenerRequest request,
         HttpListenerResponse response,
         JsonObject? parameters,
-        bool dryRun)
+        bool dryRun,
+        RequestMeta meta)
     {
         var (steps, stopOnError, error) = ParseBatchParams(parameters);
         if (error is not null)
@@ -381,7 +425,7 @@ public sealed class McpHttpServer
         JsonObject result;
         try
         {
-            result = await _handler.EnqueueBatchAsync(steps!, stopOnError, dryRun).ConfigureAwait(false);
+            result = await _handler.EnqueueBatchAsync(steps!, stopOnError, dryRun, meta).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -429,7 +473,8 @@ public sealed class McpHttpServer
         return (steps, stopOnError, null);
     }
 
-    private async Task HandleBatchAsync(HttpListenerRequest request, HttpListenerResponse response)
+    private async Task HandleBatchAsync(HttpListenerRequest request, HttpListenerResponse response,
+        RequestMeta meta)
     {
         var envelope = await ReadJsonObjectAsync(request, response).ConfigureAwait(false);
         if (envelope is null) return;
@@ -454,6 +499,7 @@ public sealed class McpHttpServer
 
         var stopOnError = envelope["stopOnError"]?.GetValue<bool>() ?? true;
         var dryRun = ParseDryRun(request, envelope);
+        meta = WithApproval(meta, envelope);
 
         var steps = new List<BatchStep>(stepsArray.Count);
         foreach (var node in stepsArray)
@@ -492,7 +538,7 @@ public sealed class McpHttpServer
         JsonObject result;
         try
         {
-            result = await _handler.EnqueueBatchAsync(steps, stopOnError, dryRun).ConfigureAwait(false);
+            result = await _handler.EnqueueBatchAsync(steps, stopOnError, dryRun, meta).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

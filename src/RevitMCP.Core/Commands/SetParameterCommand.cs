@@ -20,7 +20,7 @@ namespace RevitMCPAddin.Commands;
 ///                     (ratio, percentage, etc.) are never converted regardless
 ///                     of this field.
 /// </summary>
-public sealed class SetParameterCommand : IRevitCommand
+public sealed class SetParameterCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "set_parameter";
     public bool IsReadOnly => false;
@@ -94,6 +94,7 @@ public sealed class SetParameterCommand : IRevitCommand
         var result = new JsonObject
         {
             ["id"] = element.Id.Value,
+            ["affected"] = Affected.Modified(element.Id.Value),
             ["parameterName"] = paramName,
             ["storageType"] = param.StorageType.ToString(),
             ["written"] = wrote,
@@ -113,6 +114,26 @@ public sealed class SetParameterCommand : IRevitCommand
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Re-reads the parameter after the commit and compares it with the requested value after the
+    /// same coercion and unit conversion the write used. Catches <c>Parameter.Set</c> returning false
+    /// (previously reported only as <c>written:false</c> under <c>ok:true</c>) and values Revit changed
+    /// while committing.
+    /// </summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var doc = ctx.RequireDoc();
+        var p = ctx.Parameters;
+        var id = P.Long(p, "id");
+        var el = doc.GetElement(new ElementId(id));
+        if (el is null) return VerifyResult.Fail($"element {id} no longer exists after commit");
+        var param = el.LookupParameter(P.Str(p, "parameterName"));
+        if (param is null) return VerifyResult.Fail($"parameter '{P.Str(p, "parameterName")}' not found after commit");
+        var expected = ReadBack.ExpectedFromJson(param, p["value"]!, P.StrOrNull(p, "units") ?? "internal", "value");
+        var m = ReadBack.ParameterMismatch(param, expected);
+        return m is null ? VerifyResult.Pass($"{param.Definition.Name} = {ReadBack.SafeValueString(param)}") : VerifyResult.Fail(m);
     }
 
     /// <summary>

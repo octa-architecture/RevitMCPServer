@@ -47,6 +47,7 @@ public sealed class CreateCeilingCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(ceiling.Id.Value),
             ["id"] = ceiling.Id.Value,
             ["levelName"] = level.Name,
             ["ceilingTypeName"] = ceilingType.Name,

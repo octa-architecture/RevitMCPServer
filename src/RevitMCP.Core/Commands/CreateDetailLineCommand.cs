@@ -79,6 +79,7 @@ public sealed class CreateDetailLineCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(curve.Id.Value),
             ["id"] = curve.Id.Value,
             ["detailLineId"] = curve.Id.Value,
             ["viewId"] = viewId.Value,

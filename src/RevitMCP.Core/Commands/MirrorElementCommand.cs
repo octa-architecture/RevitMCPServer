@@ -16,7 +16,7 @@ namespace RevitMCPAddin.Commands;
 ///   - copy:     bool, default true (false = move, true = copy + mirror)
 ///   - units:    "meters"|"feet"
 /// </summary>
-public sealed class MirrorElementCommand : IRevitCommand
+public sealed class MirrorElementCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "mirror_element";
     public bool IsReadOnly => false;
@@ -51,16 +51,53 @@ public sealed class MirrorElementCommand : IRevitCommand
                 ["mirrored"] = ids.Count,
                 ["copied"] = true,
                 ["newIds"] = arr,
+                ["affected"] = Affected.Created(newIds.Select(n => n.Value)),
             };
         }
         else
         {
+            var anchors = new JsonObject();
+            foreach (var id in ids)
+                if (doc.GetElement(id) is Element e && ReadBack.Anchor(e) is XYZ a)
+                    anchors[id.Value.ToString()] = ReadBack.Xyz(a);
             ElementTransformUtils.MirrorElements(doc, ids, plane, false);
             return new JsonObject
             {
                 ["mirrored"] = ids.Count,
                 ["copied"] = false,
+                ["affected"] = Affected.Modified(ids.Select(n => n.Value)),
+                ["changes"] = new JsonObject
+                {
+                    ["originFeet"] = ReadBack.Xyz(origin),
+                    ["normal"] = ReadBack.Xyz(normal.Normalize()),
+                    ["beforeAnchorsFeet"] = anchors,
+                },
             };
         }
+    }
+    /// <summary>
+    /// With <c>copy</c>: every new id must exist. Without: each element's anchor must be the reflection
+    /// of where it stood before, across the requested plane.
+    /// </summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var doc = ctx.RequireDoc();
+        if (result["copied"]?.GetValue<bool>() == true) return ReadBack.AffectedInModel(doc, result);
+        var changes = result["changes"] as JsonObject;
+        var origin = ReadBack.Xyz(changes?["originFeet"]);
+        var normal = ReadBack.Xyz(changes?["normal"]);
+        if (origin is null || normal is null || changes?["beforeAnchorsFeet"] is not JsonObject anchors)
+            return ReadBack.AffectedInModel(doc, result);
+        var mismatches = new List<string>();
+        foreach (var kv in anchors)
+        {
+            var id = long.Parse(kv.Key, System.Globalization.CultureInfo.InvariantCulture);
+            var el = doc.GetElement(new ElementId(id));
+            if (el is null) { mismatches.Add($"{id}: missing after commit"); continue; }
+            if (ReadBack.Xyz(kv.Value) is XYZ before &&
+                ReadBack.Point("position", ReadBack.Reflect(before, origin, normal), ReadBack.Anchor(el)) is string m)
+                mismatches.Add($"{id}: {m}");
+        }
+        return ReadBack.FromMismatches(mismatches, $"{anchors.Count} mirrored element(s) re-read");
     }
 }

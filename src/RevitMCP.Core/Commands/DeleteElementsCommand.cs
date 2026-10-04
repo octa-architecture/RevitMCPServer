@@ -60,6 +60,7 @@ public sealed class DeleteElementsCommand : IRevitCommand
         return new JsonObject
         {
             ["requested"] = ids.Count,
+            ["affected"] = Affected.Deleted(deleted.Select(d => d.Value)),
             ["deleted"] = deleted.Count,
             ["deletedIds"] = deletedIds,
             ["changeSummary"] = $"Deleted {deleted.Count} elements (requested {ids.Count})",

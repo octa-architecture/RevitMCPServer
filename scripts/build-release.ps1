@@ -173,6 +173,7 @@ $required = @(
     "mcp-server/dist/index.js",
     "mcp-server/dist/revitClient.js",
     "mcp-server/dist/recipes.js",
+    "mcp-server/dist/trace.js",
     "mcp-server/package.json",
     "mcp-server/package-lock.json"
 )

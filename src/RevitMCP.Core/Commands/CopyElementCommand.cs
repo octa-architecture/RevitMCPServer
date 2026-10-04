@@ -38,6 +38,7 @@ public sealed class CopyElementCommand : IRevitCommand
         return new JsonObject
         {
             ["copiedCount"] = newIds.Count,
+            ["affected"] = Affected.Created(newIds.Select(n => n.Value)),
             ["newIds"] = arr,
         };
     }

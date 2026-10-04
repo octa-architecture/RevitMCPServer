@@ -128,6 +128,7 @@ public sealed class CreateSpotElevationCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(spot.Id.Value),
             ["spotId"] = spot.Id.Value,
             ["elevationMeters"] = hitZ * P.FeetToMeters,
             ["hasLeader"] = hasLeader,

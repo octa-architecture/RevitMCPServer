@@ -49,6 +49,7 @@ public sealed class CreateFloorCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(floor.Id.Value),
             ["id"] = floor.Id.Value,
             ["levelName"] = level.Name,
             ["floorTypeName"] = floorType.Name,

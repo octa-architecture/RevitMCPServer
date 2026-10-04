@@ -16,7 +16,7 @@ namespace RevitMCPAddin.Commands;
 ///   - newName:         string, optional — rename the new view. Applied exactly, or the command
 ///                      fails (invalid_chars 400 / name_collision 409) and no copy is left behind.
 /// </summary>
-public sealed class DuplicateViewCommand : IRevitCommand
+public sealed class DuplicateViewCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "duplicate_view";
     public bool IsReadOnly => false;
@@ -51,10 +51,15 @@ public sealed class DuplicateViewCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(newId.Value),
             ["id"] = newId.Value,
             ["name"] = newView?.Name,
             ["viewType"] = newView?.ViewType.ToString(),
             ["sourceViewId"] = srcId.Value,
         };
     }
+    /// <summary>The view must still exist after the commit, under the name the command reported.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result) =>
+        ReadBack.Created(ctx.RequireDoc(), result,
+            e => ReadBack.Text("name", result["name"]?.GetValue<string>() ?? e.Name, e.Name));
 }

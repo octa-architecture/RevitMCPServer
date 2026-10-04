@@ -27,7 +27,7 @@ API?"*, read [`docs/API_COVERAGE.md`](docs/API_COVERAGE.md).
 
 ## Status
 
-**v0.8.39** — 92 C# commands (91 exposed as MCP tools + 1 hidden) + 1 batch tool + 2 workflow recipes = **94 MCP tools**. Hidden = `create_spot_elevation`, registered for HTTP `/mcp` use but off the MCP tool surface. More HTTP-only commands can be added through opt-in [command packs](#command-packs-optional-opt-in).
+**v0.8.40** — 92 C# commands (91 exposed as MCP tools + 1 hidden) + 1 batch tool + 2 workflow recipes = **94 MCP tools**. Hidden = `create_spot_elevation`, registered for HTTP `/mcp` use but off the MCP tool surface. More HTTP-only commands can be added through opt-in [command packs](#command-packs-optional-opt-in).
 Supports **Revit 2025** (.NET 8), **Revit 2026** (.NET 8) and **Revit 2027** (.NET 10) with
 auto-port assignment for side-by-side use. Features: **dry-run mode**,
 **structured diffs**, **auth token**, **per-tool risk levels**, **Family &
@@ -147,6 +147,76 @@ add-in ships nothing for this panel to show; it is only a browser onto the URL y
 Ignore the tab entirely if you only want the MCP tool surface. Panels are additive:
 nothing in the tool surface depends on them, and a panel that fails to load cannot
 take the MCP server down with it.
+
+## Write gates: audit log and read-back (server-side, on by default)
+
+Every client — MCP over stdio, or any program calling the HTTP API directly — goes through the same
+two gates in the add-in. Both are additive: the envelope, `ok` and every existing field are unchanged.
+
+**Audit log.** One JSON line per command in `%APPDATA%\RevitMCP\audit\audit-YYYY-MM-DD.jsonl` (one
+file per UTC day); a batch writes one line per step plus a summary line sharing `batchId`. Reads are
+not logged unless asked. By default params are stored only as a SHA-256 hash and the document only as
+a hash of its path, so the log carries no model content:
+
+```json
+{"ts":"2026-10-04T12:00:00.123Z","id":"6f1c…","revit":"2027","docHash":"sha256:…","command":"set_parameter",
+ "kind":"ModelWrite","batchId":null,"step":null,"dryRun":false,"ok":true,"errorCode":null,"durationMs":42,
+ "paramsHash":"sha256:…","affected":{"created":[],"modified":[123456],"deleted":[]},
+ "verify":{"status":"passed","detail":null},"client":null,"trace":null}
+```
+
+A write failure in the log never fails the command; it shows up on `GET /health` as
+`audit.lastError`.
+
+**Read-back.** After a write commits, the add-in re-reads the model and reports what is actually
+stored in `data.verify = { status, detail }`: `passed`, `failed`, `skipped` (the check could not run,
+or a later step of the same batch changed that element again) or `not_supported`. Parameter writes are
+compared after the same unit conversion the write used; moves, rotations and mirrors on the element's
+location; created and deleted elements on whether they exist. Commands that report which elements
+they touched add `data.affected = { created, modified, deleted }`.
+
+By default a failed read-back is only reported (`ok` stays `true` — the change is committed). Strict
+mode makes it an error: a single command returns `verify_failed` (the message says the model **was**
+committed), and a batch verifies before committing and rolls back whole.
+
+Configure both with `revit-mcp-audit.json` next to the token file
+(`%APPDATA%\Autodesk\Revit\Addins\<version>\`); a missing file means these defaults:
+
+```jsonc
+{
+  "enabled": true,          // audit log on/off
+  "dir": null,              // null = %APPDATA%\RevitMCP\audit
+  "includeReads": false,    // also log read-only commands
+  "logParams": "hash",      // "hash" | "redacted" (keys + non-string values) | "full"
+  "verifyFailure": "report", // "report" | "error" (strict)
+  "mutationMode": "direct"  // "direct" | "preview_required" (see below)
+}
+```
+
+**Preview before write (optional, off by default).** With `"mutationMode": "preview_required"` every
+model write — a write command, or a batch containing one — must first be sent as a dry-run. The
+dry-run response carries an `approvalToken` (single command: `data.approvalToken`; batch: top level,
+beside `results`) plus `approvalExpiresAt`. Send the same request again with that token at the top
+level of the body, next to `params` / `steps`:
+
+```json
+{ "command": "set_parameter", "params": { "id": 123456, "parameterName": "Mark", "value": "D-101" },
+  "approvalToken": "apv_…" }
+```
+
+- The token is random, single-use and valid for 300 seconds. It is bound to the command, the exact
+  params (for a batch: the steps, their order and `stopOnError`) and the active document.
+- No token → HTTP 428 `approval_required`. Unknown, already used or expired token, or a request that
+  differs from the one previewed → HTTP 409 `approval_mismatch` (a mismatch does not use up the
+  token). A failed dry-run issues no token.
+- Read-only and UI-action commands are never gated. Tokens live in memory, so restarting Revit
+  invalidates them.
+- MCP tools that accept `dryRun` also accept `approvalToken`. `GET /health` reports `mutationMode`.
+  The audit line records `approval: {state, token}` with state `issued`, `consumed`, `required` or
+  `mismatch`; `token` is a short fingerprint, never the token itself.
+
+Command packs can implement the same read-back (`IVerifiableCommand` in `RevitMCP.Core`); a pack
+command that reports `data.affected` gets the existence check without writing any code.
 
 ## Command packs (optional, opt-in)
 
@@ -300,7 +370,7 @@ Options:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:7891/health
-# → ok=True, service=revit-mcp-addin, version=0.8.39, authEnabled=True
+# → ok=True, service=revit-mcp-addin, version=0.8.40, authEnabled=True
 ```
 
 Then restart Claude Desktop. The server shows up under **Connectors**
@@ -420,7 +490,7 @@ This produces `dist/index.js` — the small Node program Claude will launch.
    ```
    ok        : True
    service   : revit-mcp-addin
-   version   : 0.8.39
+   version   : 0.8.40
    authEnabled : True
    ```
 
@@ -579,7 +649,7 @@ Sanity check:
 Invoke-RestMethod http://127.0.0.1:7890/health   # R2025
 Invoke-RestMethod http://127.0.0.1:7891/health   # R2026
 Invoke-RestMethod http://127.0.0.1:7892/health   # R2027
-# → ok=True, service=revit-mcp-addin, version=0.8.39, authEnabled=True
+# → ok=True, service=revit-mcp-addin, version=0.8.40, authEnabled=True
 
 # Authenticated request (read the token first):
 $token = Get-Content "$env:APPDATA\Autodesk\Revit\Addins\2026\revit-mcp-token.txt"
@@ -688,6 +758,9 @@ Batches add `committed`, `count`, `hadFailures`, `results[]`. See
 | `REVIT_MCP_TIMEOUT_MS`  | Node only     | `30000`           | Per-tool-call HTTP timeout                 |
 | `REVIT_MCP_AUTH_TOKEN`  | Node only     | (auto-read)       | Override: use this token instead of file    |
 | `REVIT_MCP_VERSION`     | Node only     | `2026`            | Revit version (for token file + auto-port)  |
+| `REVIT_MCP_CLIENT`      | Node only     | (unset)           | Sent as `X-MCP-Client` (≤64 chars); recorded in the add-in's audit log |
+| `REVIT_MCP_TRACE_ID`    | Node only     | (unset)           | Sent as `X-MCP-Trace` (≤128 chars); joins a harness run to the audit log |
+| `REVIT_MCP_TRACE_FILE`  | Node only     | (unset)           | Append one JSON line per MCP tool call: `ts, tool, durationMs, ok, errorCode, reqBytes, respBytes, trace` |
 
 **Auto-port**: both the C# addin and the TypeScript bridge auto-assign a port
 based on the Revit version: R2026 = `7891`, R2027 = `7892`, R2028 = `7893`, etc.

@@ -15,7 +15,7 @@ namespace RevitMCPAddin.Commands;
 ///   - viewName: string, optional — name for the new view. Applied exactly, or the command
 ///               fails (invalid_chars 400 / name_collision 409) and nothing is created.
 /// </summary>
-public sealed class Create3DViewCommand : IRevitCommand
+public sealed class Create3DViewCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "create_3d_view";
     public bool IsReadOnly => false;
@@ -51,10 +51,15 @@ public sealed class Create3DViewCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(view.Id.Value),
             ["id"] = view.Id.Value,
             ["name"] = view.Name,
             ["viewType"] = view.ViewType.ToString(),
             ["duplicatedFrom"] = duplicated ? active3d!.Id.Value : (long?)null,
         };
     }
+    /// <summary>The view must still exist after the commit, under the name the command reported.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result) =>
+        ReadBack.Created(ctx.RequireDoc(), result,
+            e => ReadBack.Text("name", result["name"]?.GetValue<string>() ?? e.Name, e.Name));
 }

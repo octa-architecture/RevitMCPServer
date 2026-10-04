@@ -18,7 +18,7 @@ namespace RevitMCPAddin.Commands;
 ///                 (invalid_chars 400 / name_collision 409) and nothing is created.
 ///   - units:      "meters"|"feet"
 /// </summary>
-public sealed class CreateSectionViewCommand : IRevitCommand
+public sealed class CreateSectionViewCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "create_section_view";
     public bool IsReadOnly => false;
@@ -76,9 +76,14 @@ public sealed class CreateSectionViewCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(view.Id.Value),
             ["id"] = view.Id.Value,
             ["name"] = view.Name,
             ["viewType"] = view.ViewType.ToString(),
         };
     }
+    /// <summary>The view must still exist after the commit, under the name the command reported.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result) =>
+        ReadBack.Created(ctx.RequireDoc(), result,
+            e => ReadBack.Text("name", result["name"]?.GetValue<string>() ?? e.Name, e.Name));
 }

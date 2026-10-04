@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Revit MCP Server v0.8.39 (stdio).
+ * Revit MCP Server v0.8.40 (stdio).
  *
  * 94 tools covering diagnostics, inspection, creation, editing, family,
  * transform, view manipulation, annotation, model health, batch operations, and coordination/clash detection.
@@ -25,14 +25,19 @@ import {
   REVIT_BASE_URL,
 } from "./revitClient.js";
 import { modelHealthTriage, clashReview } from "./recipes.js";
+import { withTrace } from "./trace.js";
 
-const server = new McpServer({ name: "revit-mcp-server", version: "0.8.39" });
+const server = new McpServer({ name: "revit-mcp-server", version: "0.8.40" });
 
 // ── Common schemas ──────────────────────────────────────────────────────────
 const xyz = z.object({ x: z.number(), y: z.number(), z: z.number().optional() });
 const unitsField = z.enum(["meters", "feet"]).optional().describe("Units. Default 'meters'.");
 const idsField = z.array(z.number().int()).min(1).describe("Array of ElementId values.");
 const dryRunField = z.boolean().optional().describe("Preview mode: execute but rollback — model is not modified. Default false.");
+// Added automatically to every tool that has dryRun (see the server.tool override below).
+const approvalTokenField = z.string().max(128).optional().describe(
+  "Only when the add-in runs with mutationMode 'preview_required' (an approval_required error says so): " +
+  "the approvalToken returned by a dryRun of this exact call. Single-use, expires after 5 minutes.");
 const colorChannel = z.number().int().min(0).max(255);
 const rgbSchema = z.object({ r: colorChannel, g: colorChannel, b: colorChannel });
 
@@ -40,10 +45,11 @@ const rgbSchema = z.object({ r: colorChannel, g: colorChannel, b: colorChannel }
 const fwd = (cmd: string) => async (params: Record<string, unknown>) =>
   envelopeToToolResult(await callRevit(cmd, params));
 
-// Helper: forward a write command (supports dryRun)
+// Helper: forward a write command (supports dryRun and approvalToken)
 const fwdWrite = (cmd: string) => async (params: Record<string, unknown>) => {
-  const { dryRun, ...rest } = params;
-  return envelopeToToolResult(await callRevit(cmd, rest, dryRun === true));
+  const { dryRun, approvalToken, ...rest } = params;
+  return envelopeToToolResult(await callRevit(cmd, rest, dryRun === true,
+    typeof approvalToken === "string" ? approvalToken : undefined));
 };
 
 // ── Tool profiles (P2-A) ──────────────────────────────────────────────────────
@@ -134,6 +140,13 @@ const _registerTool = server.tool.bind(server);
   const profile = TOOL_PROFILE[name] ?? "core";
   if (ENABLED_PROFILES === null || ENABLED_PROFILES.has(profile)) {
     toolsRegistered++;
+    // Every write tool (it has dryRun) also accepts approvalToken, for preview_required mode.
+    const shape = args.find((a) => a !== null && typeof a === "object" && "dryRun" in (a as object));
+    if (shape) (shape as Record<string, unknown>).approvalToken = approvalTokenField;
+    // Every tool handler (commands, batch, recipes) goes through the optional trace hook.
+    const last = args.length - 1;
+    if (typeof args[last] === "function")
+      args[last] = withTrace(name, args[last] as (...a: unknown[]) => Promise<unknown>);
     return (_registerTool as (...a: unknown[]) => unknown)(...args);
   }
   toolsSkipped++;
@@ -993,7 +1006,8 @@ server.tool("revit_batch",
       params: (s.params ?? {}) as Record<string, unknown>,
     }));
     return envelopeToToolResult(
-      await callRevitBatch(steps, params.stopOnError ?? true, params.dryRun === true),
+      await callRevitBatch(steps, params.stopOnError ?? true, params.dryRun === true,
+        (params as { approvalToken?: string }).approvalToken),
     );
   },
 );
@@ -1037,7 +1051,7 @@ server.tool("revit_recipe_clash_review",
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`[revit-mcp-server] v0.8.39 connected to Revit addin at ${REVIT_BASE_URL}`);
+  console.error(`[revit-mcp-server] v0.8.40 connected to Revit addin at ${REVIT_BASE_URL}`);
   if (ENABLED_PROFILES !== null)
     console.error(
       `[revit-mcp-server] profiles: ${[...ENABLED_PROFILES].sort().join(", ")} ` +

@@ -15,7 +15,7 @@ namespace RevitMCPAddin.Commands;
 ///   - number:     string, optional. Same contract. Revit allows duplicate room names and numbers.
 ///   - units:      "meters"|"feet"
 /// </summary>
-public sealed class CreateRoomCommand : IRevitCommand
+public sealed class CreateRoomCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "create_room";
     public bool IsReadOnly => false;
@@ -43,10 +43,25 @@ public sealed class CreateRoomCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(room.Id.Value),
             ["id"] = room.Id.Value,
             ["name"] = room.Name,
             ["number"] = room.Number,
             ["levelName"] = level.Name,
         };
+    }
+    /// <summary>
+    /// The room must survive the commit (Revit can delete a room placed in a region it cannot keep)
+    /// and hold the requested name and number.
+    /// </summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var wantName = P.StrOrNull(ctx.Parameters, "name");
+        var wantNumber = P.StrOrNull(ctx.Parameters, "number");
+        return ReadBack.Created(ctx.RequireDoc(), result,
+            e => string.IsNullOrWhiteSpace(wantName) ? null
+                : ReadBack.Text("name", wantName, e.get_Parameter(BuiltInParameter.ROOM_NAME)?.AsString()),
+            e => string.IsNullOrWhiteSpace(wantNumber) ? null
+                : ReadBack.Text("number", wantNumber, ((Autodesk.Revit.DB.Architecture.Room)e).Number));
     }
 }

@@ -27,7 +27,7 @@ namespace RevitMCPAddin.Commands;
 /// returns multiple symbols), the command returns a candidate list instead of
 /// picking arbitrarily.  Specify both fields for unambiguous placement.
 /// </summary>
-public sealed class PlaceFamilyInstanceCommand : IRevitCommand
+public sealed class PlaceFamilyInstanceCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "place_family_instance";
     public bool IsReadOnly => false;
@@ -160,6 +160,7 @@ public sealed class PlaceFamilyInstanceCommand : IRevitCommand
         var result = new JsonObject
         {
             ["placed"] = true,
+            ["affected"] = Affected.Created(instance.Id.Value),
             ["id"] = instance.Id.Value,
             ["familyName"] = symbol.FamilyName,
             ["familyTypeName"] = symbol.Name,
@@ -178,5 +179,13 @@ public sealed class PlaceFamilyInstanceCommand : IRevitCommand
                                  "Provide both familyName and familyTypeName for deterministic placement.";
 
         return result;
+    }
+    /// <summary>The instance must exist and be of the family type the command reported placing.</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        if (result["familyTypeId"] is not JsonNode t) return VerifyResult.Unsupported();   // candidates-only reply
+        var want = t.GetValue<long>();
+        return ReadBack.Created(ctx.RequireDoc(), result,
+            e => e.GetTypeId().Value == want ? null : $"type: expected id {want}, stored id {e.GetTypeId().Value}");
     }
 }

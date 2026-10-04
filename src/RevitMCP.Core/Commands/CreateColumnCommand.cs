@@ -43,6 +43,7 @@ public sealed class CreateColumnCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(instance.Id.Value),
             ["id"] = instance.Id.Value,
             ["familyTypeName"] = symbol.Name,
             ["familyName"] = symbol.FamilyName,

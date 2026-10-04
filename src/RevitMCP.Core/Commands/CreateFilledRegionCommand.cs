@@ -84,6 +84,7 @@ public sealed class CreateFilledRegionCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(fr.Id.Value),
             ["filledRegionId"] = fr.Id.Value,
             ["viewId"] = viewId.Value,
             ["filledRegionTypeId"] = frtId.Value,

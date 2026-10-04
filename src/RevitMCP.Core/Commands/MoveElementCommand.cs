@@ -11,7 +11,7 @@ namespace RevitMCPAddin.Commands;
 ///   - translation: { x, y, z? }, required (in user units)
 ///   - units:       "meters"|"feet", default "meters"
 /// </summary>
-public sealed class MoveElementCommand : IRevitCommand
+public sealed class MoveElementCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "move_element";
     public bool IsReadOnly => false;
@@ -29,6 +29,10 @@ public sealed class MoveElementCommand : IRevitCommand
 
         var translation = P.Xyz(p, "translation", units);
 
+        // Anchor (location point / curve midpoint) moves exactly by the translation — the read-back
+        // compares against it after the commit.
+        var anchorBefore = ReadBack.Anchor(element);
+
         // Capture before-position from bounding box.
         var bbBefore = element.get_BoundingBox(null);
         var beforeCenter = bbBefore is not null
@@ -45,6 +49,7 @@ public sealed class MoveElementCommand : IRevitCommand
         return new JsonObject
         {
             ["id"] = id.Value,
+            ["affected"] = Affected.Modified(id.Value),
             ["name"] = element.Name,
             ["translationFeet"] = new JsonObject
             {
@@ -56,8 +61,25 @@ public sealed class MoveElementCommand : IRevitCommand
             {
                 ["beforeCenter"] = beforeCenter,
                 ["afterCenter"] = afterCenter,
+                ["beforeAnchorFeet"] = anchorBefore is null ? null : ReadBack.Xyz(anchorBefore),
             },
             ["changeSummary"] = $"Moved element {id.Value} ('{element.Name}') by ({translation.X:F2}, {translation.Y:F2}, {translation.Z:F2}) ft",
         };
+    }
+    /// <summary>
+    /// The anchor must sit at its pre-move position plus the translation, compared in feet whatever
+    /// <c>units</c> the caller used — a constrained or hosted element that did not move fully fails.
+    /// </summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var doc = ctx.RequireDoc();
+        var id = result["id"]!.GetValue<long>();
+        var el = doc.GetElement(new ElementId(id));
+        if (el is null) return VerifyResult.Fail($"element {id} no longer exists after commit");
+        var before = ReadBack.Xyz((result["changes"] as JsonObject)?["beforeAnchorFeet"]);
+        var t = ReadBack.Xyz(result["translationFeet"]);
+        if (before is null || t is null) return VerifyResult.Skip("element has no location to compare");
+        var m = ReadBack.Point("position", before + t, ReadBack.Anchor(el));
+        return m is null ? VerifyResult.Pass() : VerifyResult.Fail(m);
     }
 }

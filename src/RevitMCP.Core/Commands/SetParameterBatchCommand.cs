@@ -19,7 +19,7 @@ namespace RevitMCPAddin.Commands;
 ///                     When false (best-effort), successful writes are kept and
 ///                     the result carries partialFailure:true if any failed.
 /// </summary>
-public sealed class SetParameterBatchCommand : IRevitCommand
+public sealed class SetParameterBatchCommand : IRevitCommand, IVerifiableCommand
 {
     public string Name => "set_parameter_batch";
     public bool IsReadOnly => false;
@@ -40,6 +40,7 @@ public sealed class SetParameterBatchCommand : IRevitCommand
         var succeeded = 0;
         var failed = 0;
         var errors = new JsonArray();
+        var okIds = new List<long>();
 
         foreach (var idNode in ids)
         {
@@ -58,6 +59,7 @@ public sealed class SetParameterBatchCommand : IRevitCommand
 
                 SetValue(param, valueNode, units);
                 succeeded++;
+                okIds.Add(idValue);
             }
             catch (RevitCommandException ex)
             {
@@ -93,6 +95,7 @@ public sealed class SetParameterBatchCommand : IRevitCommand
         return new JsonObject
         {
             ["total"] = ids.Count,
+            ["affected"] = Affected.Modified(okIds),
             ["succeeded"] = succeeded,
             ["failed"] = failed,
             ["partialFailure"] = failed > 0,
@@ -101,6 +104,25 @@ public sealed class SetParameterBatchCommand : IRevitCommand
             ["changeSummary"] = $"Set '{paramName}' on {succeeded}/{ids.Count} elements" +
                                 (failed > 0 ? $" ({failed} failed)" : ""),
         };
+    }
+
+    /// <summary>Re-reads every element the batch reported as written (see <see cref="SetParameterCommand.Verify"/>).</summary>
+    public VerifyResult Verify(CommandContext ctx, JsonObject result)
+    {
+        var doc = ctx.RequireDoc();
+        var p = ctx.Parameters;
+        var paramName = P.Str(p, "parameterName");
+        var units = P.StrOrNull(p, "units") ?? "internal";
+        var ids = Affected.Read(result["affected"]).Modified;
+        var mismatches = new List<string>();
+        foreach (var id in ids)
+        {
+            var param = doc.GetElement(new ElementId(id))?.LookupParameter(paramName);
+            if (param is null) { mismatches.Add($"{id}: element or parameter missing after commit"); continue; }
+            if (ReadBack.ParameterMismatch(param, ReadBack.ExpectedFromJson(param, p["value"]!, units, "value")) is string m)
+                mismatches.Add($"{id}: {m}");
+        }
+        return ReadBack.FromMismatches(mismatches, $"{ids.Length} element(s) re-read");
     }
 
     private static void SetValue(Parameter param, JsonNode valueNode, string units)

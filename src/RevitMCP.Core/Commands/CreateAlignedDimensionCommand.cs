@@ -114,6 +114,7 @@ public sealed class CreateAlignedDimensionCommand : IRevitCommand
 
         return new JsonObject
         {
+            ["affected"] = Affected.Created(dim.Id.Value),
             ["dimensionId"] = dim.Id.Value,
             // value is Revit internal units (feet) regardless of the units parameter,
             // which governs the input coordinates only. Both are returned because

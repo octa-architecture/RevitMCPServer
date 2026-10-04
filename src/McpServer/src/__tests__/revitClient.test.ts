@@ -79,6 +79,25 @@ describe('callRevit', () => {
     const body = JSON.parse((opts as RequestInit).body as string);
     expect(body.dryRun).toBeUndefined();
   });
+
+  it('sends approvalToken beside params, never inside them', async () => {
+    vi.stubGlobal('fetch', mockFetch({ ok: true }));
+    const { callRevit } = await import('../revitClient.js');
+    await callRevit('set_parameter', { id: 7 }, false, 'apv_1');
+    const [, opts] = vi.mocked(global.fetch).mock.calls[0];
+    const body = JSON.parse((opts as RequestInit).body as string);
+    expect(body.approvalToken).toBe('apv_1');
+    expect(body.params).toEqual({ id: 7 });
+  });
+
+  it('omits approvalToken when not given', async () => {
+    vi.stubGlobal('fetch', mockFetch({ ok: true }));
+    const { callRevit } = await import('../revitClient.js');
+    await callRevit('set_parameter', { id: 7 }, true);
+    const [, opts] = vi.mocked(global.fetch).mock.calls[0];
+    const body = JSON.parse((opts as RequestInit).body as string);
+    expect('approvalToken' in body).toBe(false);
+  });
 });
 
 // ── callRevitBatch body construction ──────────────────────────────────────────
@@ -104,6 +123,16 @@ describe('callRevitBatch', () => {
     expect(body.steps).toHaveLength(1);
     expect(body.steps[0].command).toBe('ping');
     expect(body.stopOnError).toBe(true);
+  });
+
+  it('sends a batch approvalToken at the top level', async () => {
+    vi.stubGlobal('fetch', mockFetch({ ok: true }));
+    const { callRevitBatch } = await import('../revitClient.js');
+    await callRevitBatch([{ command: 'create_level', params: { elevation: 3 } }], true, false, 'apv_2');
+    const [, opts] = vi.mocked(global.fetch).mock.calls[0];
+    const body = JSON.parse((opts as RequestInit).body as string);
+    expect(body.approvalToken).toBe('apv_2');
+    expect(body.steps[0].params).toEqual({ elevation: 3 });
   });
 
   it('passes stopOnError=false when specified', async () => {
