@@ -170,6 +170,9 @@ public sealed class CommandRegistry
         // === Coordination / clash ===
         Register(new CheckClearanceCommand());
 
+        // === OCTA detailing (Commands/Octa) ===
+        Octa.OctaCommands.Register(this);
+
         // Specialised HTTP-only commands live in opt-in command packs, not here
         // (see CommandPacks and samples/HelloPack).
     }
