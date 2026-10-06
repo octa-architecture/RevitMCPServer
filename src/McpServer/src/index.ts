@@ -28,6 +28,7 @@ import { modelHealthTriage, clashReview } from "./recipes.js";
 import { withTrace } from "./trace.js";
 import { buildInstructions, registerOctaTools } from "./octa.js";
 import { registerOctaRevitTools } from "./octaTools.js";
+import { registerOctaSessionTools } from "./octaSession.js";
 
 const octaInstructions = buildInstructions();
 const server = new McpServer(
@@ -168,6 +169,7 @@ server.tool("revit_ping", "Health check. Reports active doc title.", {}, fwd("pi
 // OCTA practice standards (no-op when the OCTA shared drive isn't available) and detailing tools.
 registerOctaTools(server.tool.bind(server) as never);
 registerOctaRevitTools(server.tool.bind(server) as never, fwd, fwdWrite, dryRunField);
+registerOctaSessionTools(server.tool.bind(server) as never);
 server.tool("revit_get_version", "Get Revit version, build, language, user.", {}, fwd("get_revit_version"));
 server.tool("revit_get_document_info", "Get project info: title, path, worksharing, active view, project metadata.", {}, fwd("get_document_info"));
 

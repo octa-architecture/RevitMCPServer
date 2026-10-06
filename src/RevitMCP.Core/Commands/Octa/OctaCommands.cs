@@ -21,5 +21,8 @@ public static class OctaCommands
         r.Register(new AddInternalNoteCommand());
         r.Register(new ListInternalNotesCommand());
         r.Register(new SetInternalNotesVisibilityCommand());
+        r.Register(new ListOpenDocumentsCommand());
+        r.Register(new OpenDocumentCommand());
+        r.Register(new ExitRevitCommand());
     }
 }

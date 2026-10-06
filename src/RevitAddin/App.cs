@@ -75,6 +75,17 @@ public sealed class App : IExternalApplication
             if (auditSettings.MutationMode == MutationMode.PreviewRequired)
                 LogToConsole("[RevitMCP] mutationMode: preview_required — model writes need the approvalToken " +
                              "from a dry-run of the same request");
+            // OCTA: answer whitelisted harmless dialogs + log every dialog (unattended open/close).
+            try
+            {
+                var responder = new DialogResponder(revitVersion, LogToConsole);
+                application.DialogBoxShowing += responder.OnDialogBoxShowing;
+            }
+            catch (Exception ex)
+            {
+                LogToConsole($"[RevitMCP] Dialog responder unavailable: {ex.Message}");
+            }
+
             _externalEvent = ExternalEvent.Create(_handler);
             _handler.AttachExternalEvent(_externalEvent);
 
