@@ -49,7 +49,25 @@ public sealed class RevitMCPExternalEventHandler : IExternalEventHandler
     public void AttachExternalEvent(ExternalEvent externalEvent)
     {
         _externalEvent = externalEvent;
+        // OCTA watchdog: Revit can drop a raised ExternalEvent (e.g. while a warning dialog is up),
+        // leaving queued requests stranded forever. Every 2 s, if work is waiting and nothing has
+        // been drained for 3 s, raise again. Raise() on an already-pending event is harmless.
+        _watchdog = new System.Threading.Timer(_ =>
+        {
+            try
+            {
+                if (!_queue.IsEmpty && (DateTime.UtcNow - _lastDrainUtc).TotalSeconds > 3)
+                    _externalEvent?.Raise();
+            }
+            catch
+            {
+                // never let the watchdog take the add-in down
+            }
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
     }
+
+    private System.Threading.Timer? _watchdog;
+    private DateTime _lastDrainUtc = DateTime.UtcNow;
 
     public CommandRegistry Registry => _registry;
 
@@ -111,8 +129,10 @@ public sealed class RevitMCPExternalEventHandler : IExternalEventHandler
         // Drain the whole queue in one Revit-thread tick.  Each top-level
         // request runs in its own try/catch so one bad request can't poison
         // the others sharing this tick.
+        _lastDrainUtc = DateTime.UtcNow;
         while (_queue.TryDequeue(out var req))
         {
+            _lastDrainUtc = DateTime.UtcNow;
             var sw = Stopwatch.StartNew();
             var stepMs = new List<long>();
             JsonObject result;

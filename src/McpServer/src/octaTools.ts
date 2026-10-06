@@ -247,6 +247,35 @@ export function registerOctaRevitTools(
     { viewId: z.number().int().optional(), paddingMm: z.number().optional(), dryRun },
     fwdWrite("fit_3d_crop_to_section_box"));
 
+  // ── Site / survey ────────────────────────────────────────────────────────
+  tool("revit_new_project_from_template", "Create a new project from a template (.rte), save it to path and open it.",
+    { template: z.string(), path: z.string(), overwrite: z.boolean().optional() }, fwd("new_project_from_template"));
+  tool("revit_set_shared_coordinates",
+    "Set shared coordinates: the internal origin's survey easting/northing/elevation (metres) and angle to true north. Confirm with the user first.",
+    { eastingM: z.number(), northingM: z.number(), elevationM: z.number().optional(), trueNorthDegrees: z.number().optional(),
+      note: z.string().optional(), dryRun }, fwdWrite("set_shared_coordinates"));
+  tool("revit_link_cad", "Link a DWG/DXF (origin-to-origin by default, mm). Returns layers.",
+    { path: z.string(), viewId: z.number().int().optional(), placement: z.enum(["origin", "shared"]).optional(),
+      unit: z.enum(["mm", "m", "ft"]).optional(), thisViewOnly: z.boolean().optional(), originM: pt.optional().describe("Point in the file's own coordinates (m) to bring to the internal origin, e.g. a title boundary corner."), rotateDeg: z.number().optional().describe("Counter-clockwise rotation (deg) about the origin so the site runs square to the sheet."), dryRun }, fwdWrite("link_cad"));
+  tool("revit_get_cad_geometry", "Read linework from a linked CAD file by layer (metres, internal coordinates); without a layer returns per-layer counts.",
+    { linkId: z.number().int(), layer: z.string().optional(), maxSegments: z.number().int().optional() }, fwd("get_cad_geometry"));
+  tool("revit_link_point_cloud", "Link a point cloud (.rcp/.rcs), optionally shifted (metres) e.g. to remove an MGA truncation.",
+    { path: z.string(), shiftM: pt.optional(), originM: pt.optional().describe("Point in the file's own coordinates (m) to bring to the internal origin, e.g. a title boundary corner."), rotateDeg: z.number().optional().describe("Counter-clockwise rotation (deg) about the origin so the site runs square to the sheet."), dryRun }, fwdWrite("link_point_cloud"));
+  tool("revit_convert_coordinates", "Convert [[x,y,z]] metres between internal and shared (survey) coordinates — use to prove survey placement against TBMs.",
+    { points: z.array(z.array(z.number()).min(2)).min(1), toShared: z.boolean().optional() }, fwd("convert_coordinates"));
+  tool("revit_sample_point_cloud_grid", "Sample a point cloud into a grid of [x,y,z] points (median or min height per cell) within a box (metres).",
+    { instanceId: z.number().int(), minM: pt, maxM: pt, cellM: z.number().optional(), stat: z.enum(["median", "min"]).optional(),
+      maxPointsPerCall: z.number().int().optional() }, fwd("sample_point_cloud_grid"));
+  tool("revit_create_toposolid", "Create a toposolid from [x,y,z] points in metres (absolute heights).",
+    { points: z.array(z.array(z.number()).min(3)).min(3), typeName: z.string().optional(), levelName: z.string().optional(),
+      name: z.string().optional(), dryRun }, fwdWrite("create_toposolid"));
+  tool("revit_create_property_line", "Create a property line from a closed polygon [[x,y],...] (metres); returns bearings, lengths and area for checking against the title.",
+    { points: z.array(z.array(z.number()).min(2)).min(3), name: z.string().optional(), dryRun }, fwdWrite("create_property_line"));
+  tool("revit_survey_check",
+    "SURVEY CHECK: compare modelled surface levels against surveyed RLs at points {name,x,y,rl} (metres). The survey always takes precedence — report every mismatch.",
+    { points: z.array(z.object({ name: z.string().optional(), x: z.number(), y: z.number(), rl: z.number() })).min(1),
+      toleranceMm: z.number().optional(), elementIds: z.array(z.number().int()).optional() }, fwd("survey_check"));
+
   // ── Phasing ──────────────────────────────────────────────────────────────
   tool("revit_list_phase_filters", "List phase filters and how each shows New / Existing / Demolished / Temporary.",
     {}, fwd("list_phase_filters"));

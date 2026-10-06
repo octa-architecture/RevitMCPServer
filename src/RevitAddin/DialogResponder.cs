@@ -30,6 +30,9 @@ public sealed class DialogResponder
     private static readonly Rule[] Defaults =
     {
         new("Unresolved references → Ignore and continue", null, "could not find or read", 1002),
+        // Revit's document warning box (after a command commits with warnings). OK = continue, the
+        // same as a person clicking OK; without it an unattended session stalls.
+        new("Document warnings → OK", "Dialog_Revit_DocWarnDialog", null, 1),
     };
 
     public DialogResponder(string revitVersion, Action<string> log)

@@ -41,5 +41,15 @@ public static class OctaCommands
         r.Register(new ConvertLineLeadersCommand());
         r.Register(new CreateModelFamilyCommand());
         r.Register(new FitCropToSectionBoxCommand());
+        r.Register(new NewProjectFromTemplateCommand());
+        r.Register(new SetSharedCoordinatesCommand());
+        r.Register(new LinkCadCommand());
+        r.Register(new GetCadGeometryCommand());
+        r.Register(new LinkPointCloudCommand());
+        r.Register(new SamplePointCloudGridCommand());
+        r.Register(new CreateToposolidCommand());
+        r.Register(new CreatePropertyLineCommand());
+        r.Register(new SurveyCheckCommand());
+        r.Register(new ConvertCoordinatesCommand());
     }
 }
