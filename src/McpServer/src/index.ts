@@ -26,8 +26,13 @@ import {
 } from "./revitClient.js";
 import { modelHealthTriage, clashReview } from "./recipes.js";
 import { withTrace } from "./trace.js";
+import { buildInstructions, registerOctaTools } from "./octa.js";
 
-const server = new McpServer({ name: "revit-mcp-server", version: "0.8.40" });
+const octaInstructions = buildInstructions();
+const server = new McpServer(
+  { name: "revit-mcp-server", version: "0.8.40" },
+  octaInstructions ? { instructions: octaInstructions } : undefined,
+);
 
 // ── Common schemas ──────────────────────────────────────────────────────────
 const xyz = z.object({ x: z.number(), y: z.number(), z: z.number().optional() });
@@ -158,6 +163,9 @@ const _registerTool = server.tool.bind(server);
 // ═══════════════════════════════════════════════════════════════════════════
 
 server.tool("revit_ping", "Health check. Reports active doc title.", {}, fwd("ping"));
+
+// OCTA practice standards (no-op when the OCTA shared drive isn't available).
+registerOctaTools(server.tool.bind(server) as never);
 server.tool("revit_get_version", "Get Revit version, build, language, user.", {}, fwd("get_revit_version"));
 server.tool("revit_get_document_info", "Get project info: title, path, worksharing, active view, project metadata.", {}, fwd("get_document_info"));
 
