@@ -189,10 +189,10 @@ export function registerOctaRevitTools(
     {}, fwd("list_revisions"));
 
   tool("revit_create_revision",
-    "Create a revision numbered in the OCTA stage sequence (stageCode DD → DD-01, DD-02…; sequence created if missing). " +
+    "Create a revision numbered in the OCTA stage sequence (stageCode DD → DD-01, DD-02…; reuses the project's 'DD' sequence). " +
     "Practice OS owns the register: confirm with the user before creating revisions.",
     { stageCode: z.enum(["SD", "TP", "DD", "BP", "TD", "FC"]), description: z.string(),
-      date: z.string().describe("As shown on sheets, e.g. 2026-10-06."),
+      date: z.string().describe("As shown on sheets: dd/mm/yyyy, e.g. 06/10/2026."),
       issuedBy: z.string().optional(), issuedTo: z.string().optional(), issued: z.boolean().optional(), dryRun },
     fwdWrite("create_revision"));
 

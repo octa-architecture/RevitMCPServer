@@ -8,18 +8,24 @@ namespace RevitMCPAddin.Commands.Octa;
 
 internal static class RevisionUtil
 {
-    /// <summary>OCTA stage sequence: "OCTA <CODE>" numbering CODE-01, CODE-02 …</summary>
+    /// <summary>
+    /// OCTA stage sequence numbering CODE-01, CODE-02 … Reuses the project's existing sequence
+    /// (named after the stage code, e.g. "DD", as in Fairhaven) — never a parallel one, which
+    /// would restart the numbers. Creates one named CODE only when none exists.
+    /// </summary>
     public static RevisionNumberingSequence EnsureStageSequence(Document doc, string stageCode, out bool created)
     {
         created = false;
         var code = stageCode.Trim().ToUpperInvariant();
-        var name = $"OCTA {code}";
-        var seq = new FilteredElementCollector(doc).OfClass(typeof(RevisionNumberingSequence))
-            .Cast<RevisionNumberingSequence>()
-            .FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        var all = new FilteredElementCollector(doc).OfClass(typeof(RevisionNumberingSequence))
+            .Cast<RevisionNumberingSequence>().ToList();
+        var seq = all.FirstOrDefault(s => s.Name.Equals(code, StringComparison.OrdinalIgnoreCase))
+            ?? all.FirstOrDefault(s => s.Name.Equals($"OCTA {code}", StringComparison.OrdinalIgnoreCase))
+            ?? all.FirstOrDefault(s => s.NumberType == RevisionNumberType.Numeric &&
+                                       string.Equals(s.GetNumericRevisionSettings().Prefix, code + "-", StringComparison.OrdinalIgnoreCase));
         if (seq is not null) return seq;
         var settings = new NumericRevisionSettings { Prefix = code + "-", MinimumDigits = 2, StartNumber = 1 };
-        seq = RevisionNumberingSequence.CreateNumericSequence(doc, name, settings);
+        seq = RevisionNumberingSequence.CreateNumericSequence(doc, code, settings);
         created = true;
         return seq;
     }
@@ -75,9 +81,10 @@ public sealed class ListRevisionsCommand : IRevitCommand
 }
 
 /// <summary>
-/// Create a revision in an OCTA stage sequence (numbered CODE-NN, e.g. DD-02). The sequence
-/// "OCTA CODE" is created if missing. Params: stageCode (SD|TP|DD|BP|TD|FC), description, date
-/// (text as shown on sheets, e.g. 2026-10-06), issuedBy?, issuedTo?, issued? (default false).
+/// Create a revision in an OCTA stage sequence (numbered CODE-NN, e.g. DD-02). The project's
+/// sequence named CODE is reused, or created if missing. Params: stageCode (SD|TP|DD|BP|TD|FC),
+/// description, date (text as shown on sheets, OCTA format dd/mm/yyyy), issuedBy?, issuedTo?,
+/// issued? (default false).
 /// </summary>
 public sealed class CreateRevisionCommand : IRevitCommand
 {
