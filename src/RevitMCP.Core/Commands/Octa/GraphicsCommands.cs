@@ -292,6 +292,46 @@ public sealed class FitCropToSectionBoxCommand : IRevitCommand
     }
 }
 
+/// <summary>
+/// Crop a view to a model-space rectangle so images and sheets frame just the site, not stray
+/// far-away linework. Params: viewId, min [x,y] and max [x,y] in metres (internal), visible? (false).
+/// </summary>
+public sealed class SetViewCropCommand : IRevitCommand
+{
+    public string Name => "set_view_crop";
+    public bool IsReadOnly => false;
+    public string RiskLevel => "low";
+
+    public JsonNode? Execute(CommandContext ctx)
+    {
+        var doc = ctx.RequireDoc();
+        var p = ctx.Parameters;
+        var v = OctaUtil.ResolveView(doc, p);
+        if (v.ViewType is ViewType.DrawingSheet or ViewType.Schedule)
+            throw new RevitCommandException("invalid_parameter", $"'{v.Name}' can't be cropped.");
+        double Get(string key, int i) => P.DblFrom(P.Arr(p, key)[i], key) * P.MetersToFeet;
+        var crop = v.CropBox;
+        var inv = crop.Transform.Inverse;
+        double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+        foreach (var x in new[] { Get("min", 0), Get("max", 0) })
+            foreach (var y in new[] { Get("min", 1), Get("max", 1) })
+            {
+                var q = inv.OfPoint(new XYZ(x, y, 0));
+                minX = Math.Min(minX, q.X); minY = Math.Min(minY, q.Y);
+                maxX = Math.Max(maxX, q.X); maxY = Math.Max(maxY, q.Y);
+            }
+        v.CropBoxActive = true;
+        v.CropBox = new BoundingBoxXYZ
+        {
+            Transform = crop.Transform,
+            Min = new XYZ(minX, minY, crop.Min.Z),
+            Max = new XYZ(maxX, maxY, crop.Max.Z),
+        };
+        v.CropBoxVisible = P.BoolOr(p, "visible", false);
+        return new JsonObject { ["affected"] = Affected.Modified(v.Id.Value), ["viewId"] = v.Id.Value, ["cropped"] = true };
+    }
+}
+
 /// <summary>Set a view's scale (1:N). Params: viewId, scale (N). Fails if a template controls scale.</summary>
 public sealed class SetViewScaleCommand : IRevitCommand
 {

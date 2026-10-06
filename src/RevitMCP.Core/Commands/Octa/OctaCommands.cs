@@ -41,6 +41,7 @@ public static class OctaCommands
         r.Register(new ConvertLineLeadersCommand());
         r.Register(new CreateModelFamilyCommand());
         r.Register(new FitCropToSectionBoxCommand());
+        r.Register(new SetViewCropCommand());
         r.Register(new NewProjectFromTemplateCommand());
         r.Register(new SetSharedCoordinatesCommand());
         r.Register(new LinkCadCommand());

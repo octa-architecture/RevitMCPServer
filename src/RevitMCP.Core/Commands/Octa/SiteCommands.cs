@@ -39,7 +39,8 @@ public sealed class NewProjectFromTemplateCommand : IRevitCommand
 /// <summary>
 /// Set the project's shared coordinates: internal origin = (eastingM, northingM, elevationM) in the
 /// survey grid, optional angle to true north (degrees). Records a datum note in Project Information
-/// comments. Params: eastingM, northingM, elevationM? (0), trueNorthDegrees? (0), note?.
+/// comments. Params: eastingM, northingM, elevationM? (0), note?, and either siteRotationDeg
+/// (preferred: the same CCW angle given to link_cad rotateDeg) or trueNorthDegrees (raw; = -siteRotationDeg).
 /// </summary>
 public sealed class SetSharedCoordinatesCommand : IRevitCommand
 {
@@ -52,8 +53,11 @@ public sealed class SetSharedCoordinatesCommand : IRevitCommand
         var doc = ctx.RequireDoc();
         var p = ctx.Parameters;
         var ft = P.MetersToFeet;
+        // Rotating the survey CCW by θ to square it to the sheet puts true north at -θ in Revit's
+        // ProjectPosition convention (verified at Grant St: both TBMs convert back exactly).
+        var angleDeg = p["siteRotationDeg"] is not null ? -P.Dbl(p, "siteRotationDeg") : P.DblOr(p, "trueNorthDegrees", 0);
         var pos = new ProjectPosition(P.Dbl(p, "eastingM") * ft, P.Dbl(p, "northingM") * ft,
-            P.DblOr(p, "elevationM", 0) * ft, P.DblOr(p, "trueNorthDegrees", 0) * Math.PI / 180);
+            P.DblOr(p, "elevationM", 0) * ft, angleDeg * Math.PI / 180);
         doc.ActiveProjectLocation.SetProjectPosition(XYZ.Zero, pos);
         if (P.StrOrNull(p, "note") is { } note)
             doc.ProjectInformation.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.Set(note);
@@ -131,11 +135,15 @@ internal static class SiteXf
     public static void Apply(Document doc, ElementId id, Transform t)
     {
         var angle = Math.Atan2(t.BasisX.Y, t.BasisX.X);
+        // Links arrive pinned: unpin to place, then pin again so the survey can't be nudged by accident.
+        var el = doc.GetElement(id);
+        el.Pinned = false;
         // t(p) = R·p + o  ==  move by R⁻¹·o, then rotate by R about the internal origin.
         var preMove = Transform.CreateRotation(XYZ.BasisZ, -angle).OfVector(t.Origin);
         if (preMove.GetLength() > 1e-9) ElementTransformUtils.MoveElement(doc, id, preMove);
         if (Math.Abs(angle) > 1e-12)
             ElementTransformUtils.RotateElement(doc, id, Line.CreateUnbound(XYZ.Zero, XYZ.BasisZ), angle);
+        el.Pinned = true;
     }
 }
 
@@ -272,26 +280,45 @@ public sealed class SamplePointCloudGridCommand : IRevitCommand
 
         var tf = inst.GetTotalTransform();
         var inv = tf.Inverse;
-        // Filter box in the cloud's own coordinates.
         var bbAll = inst.get_BoundingBox(null);
-        var c0 = inv.OfPoint(new XYZ(min.X, min.Y, bbAll.Min.Z - 1));
-        var c1 = inv.OfPoint(new XYZ(max.X, max.Y, bbAll.Max.Z + 1));
-        var lo = new XYZ(Math.Min(c0.X, c1.X), Math.Min(c0.Y, c1.Y), Math.Min(c0.Z, c1.Z));
-        var hi = new XYZ(Math.Max(c0.X, c1.X), Math.Max(c0.Y, c1.Y), Math.Max(c0.Z, c1.Z));
-        var planes = new List<Plane>
+        var maxPts = Math.Clamp(P.IntOr(p, "maxPointsPerCall", 999_999), 1, 999_999);
+
+        static PointCloudFilter BoxFilter(XYZ lo, XYZ hi) => PointCloudFilterFactory.CreateMultiPlaneFilter(new List<Plane>
         {
             Plane.CreateByNormalAndOrigin(XYZ.BasisX, lo), Plane.CreateByNormalAndOrigin(-XYZ.BasisX, hi),
             Plane.CreateByNormalAndOrigin(XYZ.BasisY, lo), Plane.CreateByNormalAndOrigin(-XYZ.BasisY, hi),
             Plane.CreateByNormalAndOrigin(XYZ.BasisZ, lo), Plane.CreateByNormalAndOrigin(-XYZ.BasisZ, hi),
-        };
-        var filter = PointCloudFilterFactory.CreateMultiPlaneFilter(planes);
-        var pts = inst.GetPoints(filter, cell / 4, P.IntOr(p, "maxPointsPerCall", 1_000_000));
+        });
+
+        // Revit's docs are ambiguous about which frame the filter uses: try the box in MODEL
+        // coordinates first, then in the cloud's own coordinates (all 8 corners, so a rotated
+        // placement is fully covered).
+        var mlo = new XYZ(min.X, min.Y, bbAll.Min.Z - 1);
+        var mhi = new XYZ(max.X, max.Y, bbAll.Max.Z + 1);
+        var pts = inst.GetPoints(BoxFilter(mlo, mhi), cell / 4, maxPts);
+        string filterFrame = "model";
+        if (pts.Count == 0)
+        {
+            var corners = new[] { mlo.X, mhi.X }.SelectMany(x => new[] { mlo.Y, mhi.Y }.SelectMany(y =>
+                new[] { mlo.Z, mhi.Z }.Select(z => inv.OfPoint(new XYZ(x, y, z))))).ToList();
+            var lo = new XYZ(corners.Min(c => c.X), corners.Min(c => c.Y), corners.Min(c => c.Z));
+            var hi = new XYZ(corners.Max(c => c.X), corners.Max(c => c.Y), corners.Max(c => c.Z));
+            pts = inst.GetPoints(BoxFilter(lo, hi), cell / 4, maxPts);
+            filterFrame = "cloud";
+        }
+
+        // Returned points: decide their frame from the data — if most already fall inside the
+        // model-space box they're model coordinates, otherwise transform them.
+        var raw = pts.Cast<CloudPoint>().Select(cp => new XYZ(cp.X, cp.Y, cp.Z)).ToList();
+        int insideAsModel = raw.Take(2000).Count(q => q.X >= mlo.X && q.X <= mhi.X && q.Y >= mlo.Y && q.Y <= mhi.Y);
+        bool pointsAreModel = raw.Count > 0 && insideAsModel >= Math.Min(2000, raw.Count) * 0.8;
 
         var bins = new Dictionary<(int, int), List<double>>();
         int read = 0;
-        foreach (CloudPoint cp in pts)
+        foreach (var q in raw)
         {
-            var w = tf.OfPoint(new XYZ(cp.X, cp.Y, cp.Z));
+            var w = pointsAreModel ? q : tf.OfPoint(q);
+            if (w.X < min.X || w.X > max.X || w.Y < min.Y || w.Y > max.Y) continue;
             int i = (int)Math.Floor((w.X - min.X) / cell), j = (int)Math.Floor((w.Y - min.Y) / cell);
             if (!bins.TryGetValue((i, j), out var list)) bins[(i, j)] = list = new List<double>();
             list.Add(w.Z);
@@ -306,7 +333,11 @@ public sealed class SamplePointCloudGridCommand : IRevitCommand
             double x = min.X + (kv.Key.Item1 + 0.5) * cell, y = min.Y + (kv.Key.Item2 + 0.5) * cell;
             outPts.Add(new JsonArray(Math.Round(x * P.FeetToMeters, 3), Math.Round(y * P.FeetToMeters, 3), Math.Round(z * P.FeetToMeters, 3)));
         }
-        return new JsonObject { ["pointsRead"] = read, ["cells"] = outPts.Count, ["points"] = outPts };
+        return new JsonObject
+        {
+            ["pointsRead"] = read, ["pointsReturned"] = raw.Count, ["filterFrame"] = filterFrame,
+            ["pointsFrame"] = pointsAreModel ? "model" : "cloud", ["cells"] = outPts.Count, ["points"] = outPts,
+        };
     }
 }
 
@@ -409,8 +440,13 @@ public sealed class SurveyCheckCommand : IRevitCommand
     {
         var doc = ctx.RequireDoc();
         var p = ctx.Parameters;
-        var view3d = new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>()
-            .FirstOrDefault(v => !v.IsTemplate && !v.IsPerspective)
+        // The ray only sees what the view shows: a section box (common in templates) clips the
+        // terrain, so prefer an explicit viewId, then a 3D view with no section box.
+        var views3d = new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>()
+            .Where(v => !v.IsTemplate && !v.IsPerspective).ToList();
+        var view3d = (p["viewId"] is not null ? doc.GetElement(new ElementId(P.Long(p, "viewId"))) as View3D : null)
+            ?? views3d.FirstOrDefault(v => !v.IsSectionBoxActive)
+            ?? views3d.FirstOrDefault()
             ?? throw new RevitCommandException("not_found", "Need a 3D view for the survey check.");
         var tol = P.DblOr(p, "toleranceMm", 10);
         ReferenceIntersector ri;

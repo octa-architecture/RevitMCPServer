@@ -246,13 +246,19 @@ export function registerOctaRevitTools(
     "Crop a 3D view to its section box so revit_get_view_image (and sheets) frame just the boxed area.",
     { viewId: z.number().int().optional(), paddingMm: z.number().optional(), dryRun },
     fwdWrite("fit_3d_crop_to_section_box"));
+  tool("revit_set_view_crop",
+    "Crop a view to a model-space rectangle (metres, internal coordinates) so images and sheets frame just the site.",
+    { viewId: z.number().int().optional(), min: z.array(z.number()).length(2), max: z.array(z.number()).length(2),
+      visible: z.boolean().optional(), dryRun }, fwdWrite("set_view_crop"));
 
   // ── Site / survey ────────────────────────────────────────────────────────
   tool("revit_new_project_from_template", "Create a new project from a template (.rte), save it to path and open it.",
     { template: z.string(), path: z.string(), overwrite: z.boolean().optional() }, fwd("new_project_from_template"));
   tool("revit_set_shared_coordinates",
     "Set shared coordinates: the internal origin's survey easting/northing/elevation (metres) and angle to true north. Confirm with the user first.",
-    { eastingM: z.number(), northingM: z.number(), elevationM: z.number().optional(), trueNorthDegrees: z.number().optional(),
+    { eastingM: z.number(), northingM: z.number(), elevationM: z.number().optional(),
+      siteRotationDeg: z.number().optional().describe("Preferred: the same counter-clockwise angle used as rotateDeg on the survey links; true north is set from it."),
+      trueNorthDegrees: z.number().optional().describe("Raw Revit angle (= -siteRotationDeg). Prefer siteRotationDeg."),
       note: z.string().optional(), dryRun }, fwdWrite("set_shared_coordinates"));
   tool("revit_link_cad", "Link a DWG/DXF (origin-to-origin by default, mm). Returns layers.",
     { path: z.string(), viewId: z.number().int().optional(), placement: z.enum(["origin", "shared"]).optional(),
@@ -274,7 +280,8 @@ export function registerOctaRevitTools(
   tool("revit_survey_check",
     "SURVEY CHECK: compare modelled surface levels against surveyed RLs at points {name,x,y,rl} (metres). The survey always takes precedence — report every mismatch.",
     { points: z.array(z.object({ name: z.string().optional(), x: z.number(), y: z.number(), rl: z.number() })).min(1),
-      toleranceMm: z.number().optional(), elementIds: z.array(z.number().int()).optional() }, fwd("survey_check"));
+      toleranceMm: z.number().optional(), elementIds: z.array(z.number().int()).optional(),
+      viewId: z.number().int().optional().describe("3D view to cast in (default: first 3D view without a section box).") }, fwd("survey_check"));
 
   // ── Phasing ──────────────────────────────────────────────────────────────
   tool("revit_list_phase_filters", "List phase filters and how each shows New / Existing / Demolished / Temporary.",
