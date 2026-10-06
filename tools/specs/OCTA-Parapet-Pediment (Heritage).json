@@ -1,0 +1,26 @@
+{
+  "name": "OCTA-Parapet-Pediment (Heritage)",
+  "template": "generic",
+  "category": "Generic Models",
+  "folder": "H:\\Shared drives\\OCTA\\3 Standards & Library\\1 Revit\\4 Family Development\\OCTA-Parapet-Pediment (Heritage)",
+  "parameters": [ { "name": "Render Material", "kind": "material" } ],
+  "planes": [
+    { "name": "BI", "axis": "y", "offset": -125 },
+    { "name": "BO", "axis": "y", "offset": 125 },
+    { "name": "MO", "axis": "y", "offset": 185 },
+    { "name": "BMO", "axis": "y", "offset": 165 }
+  ],
+  "dimensions": [],
+  "boxes": [],
+  "extrusions": [
+    { "name": "tympanum", "y": ["BI", "BO"], "material": "Render Material",
+      "loops": [ [ [-1310, 0], [1310, 0], [0, 938] ] ] },
+    { "name": "raking cornice", "y": ["BO", "MO"], "material": "Render Material",
+      "loops": [ [ [-1310, 0], [-1170, 0], [0, 840], [1170, 0], [1310, 0], [0, 938] ] ] },
+    { "name": "raking cornice fillet", "y": ["BO", "BMO"], "material": "Render Material",
+      "loops": [ [ [-1170, 0], [-1110, 0], [0, 795], [1110, 0], [1170, 0], [0, 840] ] ] },
+    { "name": "base moulding", "y": ["BO", "BMO"], "material": "Render Material",
+      "loops": [ [ [-1310, 0], [1310, 0], [1310, 55], [-1310, 55] ] ] }
+  ],
+  "types": [ { "name": "42 Grant St pediment 2620 x 938", "values": {} } ]
+}
