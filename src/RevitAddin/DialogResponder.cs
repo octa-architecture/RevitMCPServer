@@ -22,8 +22,10 @@ public sealed class DialogResponder
     private sealed record Rule(string Name, string? DialogId, string? MessageContains, int Result);
 
     private readonly List<Rule> _rules = new();
-    private readonly bool _enabled = true;
+    private bool _enabled = true;
     private readonly string _logPath;
+    private readonly string _cfgPath;
+    private DateTime _cfgStamp = DateTime.MinValue;
     private readonly Action<string> _log;
 
     // TaskDialogResult.CommandLink2 = 1002: the second command link.
@@ -41,11 +43,26 @@ public sealed class DialogResponder
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "Autodesk", "Revit", "Addins", revitVersion);
         _logPath = Path.Combine(dir, "revit-mcp-dialogs.log");
-        var cfg = Path.Combine(dir, "revit-mcp-dialogs.json");
+        _cfgPath = Path.Combine(dir, "revit-mcp-dialogs.json");
+        Load();
+        _log($"[RevitMCP] Dialog responder {(_enabled ? "ON (unattended)" : "OFF (attended)")} — {_rules.Count} rule(s)");
+    }
+
+    /// <summary>
+    /// (Re)load the rules. Called at start-up and whenever the file changes, so switching between
+    /// attended ("enabled": false — every dialog is left for the person at the PC) and unattended
+    /// mode takes effect immediately, without restarting Revit.
+    /// </summary>
+    private void Load()
+    {
+        var cfg = _cfgPath;
+        _rules.Clear();
+        _enabled = true;
         try
         {
             if (File.Exists(cfg))
             {
+                _cfgStamp = File.GetLastWriteTimeUtc(cfg);
                 var root = JsonNode.Parse(File.ReadAllText(cfg)) as JsonObject;
                 _enabled = root?["enabled"]?.GetValue<bool>() ?? true;
                 if (root?["rules"] is JsonArray arr)
@@ -65,11 +82,16 @@ public sealed class DialogResponder
             _rules.Clear();
             _rules.AddRange(Defaults);
         }
-        _log($"[RevitMCP] Dialog responder {(_enabled ? "ON" : "OFF")} — {_rules.Count} rule(s)");
     }
 
     public void OnDialogBoxShowing(object? sender, DialogBoxShowingEventArgs e)
     {
+        try
+        {
+            var stamp = File.Exists(_cfgPath) ? File.GetLastWriteTimeUtc(_cfgPath) : DateTime.MinValue;
+            if (stamp != _cfgStamp) { Load(); _cfgStamp = stamp; }
+        }
+        catch { /* keep the current rules */ }
         var message = e switch
         {
             TaskDialogShowingEventArgs t => t.Message,

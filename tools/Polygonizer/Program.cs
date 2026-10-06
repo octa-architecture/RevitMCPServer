@@ -34,6 +34,15 @@ else if (args[0] == "lace")
     Console.WriteLine(Lacework.Run(args));
 }
 else if (args[0] == "lacediag2") Lacework.Diag2(args);
+else if (args[0] == "lacegen") Console.WriteLine(LaceGen.Run(args[1], args[2]));
+else if (args[0] == "imgtrace")
+{
+    // Polygonizer imgtrace <png> <out.json> <preview.png> <heightMm> [cellPx=2] [tolPx=1.2] [minAreaPx=6] [invert|-] [tiles=1]
+    if (args.Length > 9) ImageTrace.Tiles = int.Parse(args[9]);
+    Console.WriteLine(ImageTrace.Run(args[1], args[2], args[3], double.Parse(args[4], inv),
+        args.Length > 5 ? int.Parse(args[5]) : 2, args.Length > 6 ? double.Parse(args[6], inv) : 1.2,
+        args.Length > 7 ? double.Parse(args[7], inv) : 6, args.Length > 8 && args[8] == "invert"));
+}
 else if (args[0] == "walls")
 {
     // Polygonizer walls <segments.json> <out.json>

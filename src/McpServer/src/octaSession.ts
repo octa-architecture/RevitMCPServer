@@ -94,6 +94,27 @@ export function registerOctaSessionTools(tool: ToolFn): void {
         error: gone ? undefined : "Revit is still running — a dialog may be waiting at the PC." }, !gone);
     });
 
+  tool("revit_set_dialog_mode",
+    "Switch Revit dialog handling. 'attended' (the user is at the PC): every dialog is shown to them, nothing is auto-answered — also don't restart Revit without asking. 'unattended' (away from keyboard / remote): the whitelisted harmless dialogs (unresolved references, document-warning OK) are answered automatically. Takes effect immediately.",
+    { mode: z.enum(["attended", "unattended"]) },
+    async (p) => {
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      const file = path.join(process.env.APPDATA ?? "", "Autodesk", "Revit", "Addins", "2027", "revit-mcp-dialogs.json");
+      let cfg: Record<string, unknown> = {};
+      try { cfg = JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* start fresh */ }
+      cfg.enabled = p.mode === "unattended";
+      cfg.note = p.mode === "unattended"
+        ? "UNATTENDED mode: whitelisted dialogs are answered automatically."
+        : "ATTENDED mode: dialogs are shown to the user, not auto-answered.";
+      if (!Array.isArray(cfg.rules)) cfg.rules = [
+        { name: "Unresolved references -> Ignore and continue", messageContains: "could not find or read", result: 1002 },
+        { name: "Document warnings -> OK", dialogId: "Dialog_Revit_DocWarnDialog", result: 1 },
+      ];
+      fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, mode: p.mode, file }) }] };
+    });
+
   tool("revit_list_open_documents", "List documents open in Revit (title, path, modified, active).", {},
     async () => envelopeToToolResult(await callRevit("list_open_documents", {})));
 

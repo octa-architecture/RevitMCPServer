@@ -104,6 +104,7 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
             using (var t = new Transaction(fam, "Build family"))
             {
                 t.Start();
+                { var fho = t.GetFailureHandlingOptions(); fho.SetFailuresPreprocessor(new QuietFailures()); t.SetFailureHandlingOptions(fho); }
                 stage = "new type"; if (mgr.CurrentType is null) mgr.NewType(name);
 
                 // Category is set AFTER the parameters (below): categories like Casework bring built-in
@@ -352,6 +353,59 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                         mgr.AssociateElementParameterToFamilyParameter(rev.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM), mp2);
                 }
 
+                // Profile extrusions drawn in elevation (lacework, brackets, fretwork): each item is one
+                // closed loop [[x,z],...] in mm (x from CX, z from LEVEL), extruded between two y planes.
+                // A loop may carry holes: { loops: [outer, hole, hole...] }. Fixed geometry, not flexed.
+                stage = "profile extrusions";
+                int extrusionIndex = 0;
+                foreach (var node in p["extrusions"] as JsonArray ?? new JsonArray())
+                {
+                    if (node is not JsonObject o) continue;
+                    var ys = P.Arr(o, "y");
+                    double y0 = Get(planes, P.StrFrom(ys[0], "y")).Position, y1 = Get(planes, P.StrFrom(ys[1], "y")).Position;
+                    double ya = Math.Min(y0, y1), depth = Math.Abs(y1 - y0);
+                    var arr = new CurveArrArray();
+                    foreach (var loopNode in P.Arr(o, "loops"))
+                    {
+                        var pts = ((JsonArray)loopNode!).Select(a => (JsonArray)a!)
+                            .Select(a => new XYZ(P.DblFrom(a[0], "x") * Mm, ya, P.DblFrom(a[1], "z") * Mm)).ToList();
+                        var ca = new CurveArray();
+                        for (int i = 0; i < pts.Count; i++)
+                        {
+                            var a = pts[i]; var b = pts[(i + 1) % pts.Count];
+                            if (a.DistanceTo(b) > fam.Application.ShortCurveTolerance) ca.Append(Line.CreateBound(a, b));
+                        }
+                        arr.Append(ca);
+                    }
+                    var sk = SketchPlane.Create(fam, Plane.CreateByNormalAndOrigin(XYZ.BasisY, new XYZ(0, ya, 0)));
+                    Extrusion? ext = null;
+                    try
+                    {
+                        ext = fam.FamilyCreate.NewExtrusion(true, arr, sk, depth);
+                        // Validate now: a bad profile (self-crossing loop) otherwise fails the whole
+                        // transaction at commit and takes every other element with it.
+                        using (var st = new SubTransaction(fam))
+                        {
+                            st.Start();
+                            fam.Regenerate();
+                            st.Commit();
+                        }
+                        if (ext.get_Geometry(new Options()) is not { } eg || !eg.OfType<Solid>().Any(s => s.Volume > 0))
+                            throw new InvalidOperationException("no solid produced");
+                        // the sketch normal is +Y: make sure the solid sits between the two planes
+                        if (ext.get_BoundingBox(null) is { } bb && bb.Min.Y < ya - Tol)
+                            ext.get_Parameter(BuiltInParameter.EXTRUSION_START_PARAM)?.Set(0);
+                        if (P.StrOrNull(o, "material") is { } em && famParams.TryGetValue(em, out var emp))
+                            mgr.AssociateElementParameterToFamilyParameter(ext.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM), emp);
+                    }
+                    catch (Exception ex)
+                    {
+                        warnings.Add($"extrusion {extrusionIndex}: dropped ({ex.Message})");
+                        try { if (ext is not null && ext.IsValidObject) fam.Delete(ext.Id); } catch { }
+                    }
+                    extrusionIndex++;
+                }
+
                 // Door swing in plan: leaf line on the hinge plane + 90° arc, radius labelled with the
                 // leaf-width parameter so it follows the type width. { hinge, strike, leafFace, direction (+1/-1), parameter }
                 if (p["swing"] is JsonObject sw)
@@ -403,7 +457,8 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                         catch (Exception ex) { warnings.Add($"{label}: couldn't lock face ({n.X:0},{n.Y:0},{n.Z:0}): {ex.Message}"); }
                     }
                 }
-                t.Commit();
+                if (t.Commit() != TransactionStatus.Committed)
+                    throw new RevitCommandException("command_failed", "Revit rolled back the family geometry at commit (an invalid shape or constraint). Warnings: " + string.Join("; ", warnings.Select(w => w?.ToString())));
             }
 
             RefreshParams();
@@ -520,7 +575,7 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                     : "Flex test failed: nothing saved. Usually a face that isn't dimensioned to a parameter or locked.",
             };
         }
-        catch (Exception ex) when (ex is NullReferenceException or InvalidOperationException)
+        catch (Exception ex) when (ex is not RevitCommandException)
         {
             // Unexpected internal failure: report where, so it can be fixed rather than guessed at.
             var frame = ex.StackTrace?.Split('\n').FirstOrDefault(l => l.Contains("CreateModelFamilyCommand"))?.Trim();
