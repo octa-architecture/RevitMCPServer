@@ -55,9 +55,21 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
         var name = P.Str(p, "name");
         if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
             throw new RevitCommandException("invalid_parameter", $"'{name}' isn't a valid file name.");
-        if (!File.Exists(Template)) throw new RevitCommandException("not_found", $"Template missing: {Template}");
+        // template: "generic" (default) | "window" | "door" | a full .rft path. Window/door templates
+        // bring a host wall, the opening cut and their own planes (Left, Right, Sill, Head, Exterior,
+        // Interior…) and Width/Height parameters — all usable by name in planes/boxes/dimensions.
+        var tplKey = P.StrOrNull(p, "template") ?? "generic";
+        var tplDir = Path.GetDirectoryName(Template)!;
+        var template = tplKey.ToLowerInvariant() switch
+        {
+            "generic" => Template,
+            "window" => Path.Combine(tplDir, "Metric Window.rft"),
+            "door" => Path.Combine(tplDir, "Metric Door.rft"),
+            _ => tplKey,
+        };
+        if (!File.Exists(template)) throw new RevitCommandException("not_found", $"Template missing: {template}");
 
-        var fam = ctx.App.Application.NewFamilyDocument(Template)
+        var fam = ctx.App.Application.NewFamilyDocument(template)
             ?? throw new RevitCommandException("command_failed", "Revit couldn't create a family document.");
         var warnings = new JsonArray();
         var stage = "start";
@@ -68,8 +80,9 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
             var plan = new FilteredElementCollector(fam).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
                 .Where(v => !v.IsTemplate).OrderBy(v => v.ViewType == ViewType.FloorPlan ? 0 : 1).First();
             var front = new FilteredElementCollector(fam).OfClass(typeof(View)).Cast<View>()
-                .FirstOrDefault(v => !v.IsTemplate && v.ViewType == ViewType.Elevation && v.Name.Contains("Front"))
-                ?? throw new RevitCommandException("command_failed", "Template has no Front elevation.");
+                .Where(v => !v.IsTemplate && v.ViewType == ViewType.Elevation)
+                .OrderBy(v => v.Name.Contains("Front") ? 0 : v.Name.Contains("Exterior") ? 1 : 2).FirstOrDefault()
+                ?? throw new RevitCommandException("command_failed", "Template has no elevation view.");
             var mgr = fam.FamilyManager;
             var planes = new Dictionary<string, PlaneRef>(StringComparer.OrdinalIgnoreCase);
             var famParams = new Dictionary<string, FamilyParameter>(StringComparer.OrdinalIgnoreCase);
@@ -107,9 +120,35 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                 {
                     if (rp.Name == "Center (Left/Right)") planes["CX"] = new PlaneRef { Axis = 'x', Rp = rp };
                     else if (rp.Name == "Center (Front/Back)") planes["CY"] = new PlaneRef { Axis = 'y', Rp = rp };
+                    // Every named template plane is usable by its own name too (Left, Sill, Exterior…).
+                    if (!string.IsNullOrEmpty(rp.Name))
+                    {
+                        var nrm = rp.Normal;
+                        char ax = Math.Abs(nrm.X) > 0.99 ? 'x' : Math.Abs(nrm.Y) > 0.99 ? 'y' : Math.Abs(nrm.Z) > 0.99 ? 'z' : '?';
+                        if (ax != '?') planes.TryAdd(rp.Name, new PlaneRef { Axis = ax, Rp = rp });
+                    }
                 }
                 var level = new FilteredElementCollector(fam).OfClass(typeof(Level)).Cast<Level>().First();
                 planes["LEVEL"] = new PlaneRef { Axis = 'z', Level = level };
+
+                if (P.BoolOr(p, "inspectTemplate", false))
+                {
+                    var info = new JsonObject
+                    {
+                        ["template"] = template,
+                        ["planes"] = new JsonArray(planes.Select(kv => (JsonNode)new JsonObject
+                        {
+                            ["name"] = kv.Key, ["axis"] = kv.Value.Axis.ToString(), ["positionMm"] = Math.Round(kv.Value.Position / Mm, 1),
+                        }).ToArray()),
+                        ["parameters"] = new JsonArray(mgr.Parameters.Cast<FamilyParameter>().Where(x => x.Definition is not null)
+                            .Select(x => (JsonNode)$"{x.Definition.Name}{(x.IsInstance ? " (instance)" : "")}{(string.IsNullOrEmpty(x.Formula) ? "" : " = " + x.Formula)}").ToArray()),
+                        ["views"] = new JsonArray(new FilteredElementCollector(fam).OfClass(typeof(View)).Cast<View>().Where(v => !v.IsTemplate)
+                            .Select(v => (JsonNode)$"{v.ViewType}: {v.Name}").ToArray()),
+                        ["category"] = fam.OwnerFamily.FamilyCategory?.Name,
+                    };
+                    t.RollBack();
+                    return info;
+                }
 
                 // Pass 1: length / yes-no parameters, then the category, then (pass 2) materials —
                 // changing category invalidates material parameters created before it.

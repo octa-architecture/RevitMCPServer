@@ -1,0 +1,50 @@
+{
+  "name": "OCTA-Verandah-Lacework Frieze (Heritage)",
+  "template": "generic",
+  "category": "Generic Models",
+  "folder": "H:\\Shared drives\\OCTA\\3 Standards & Library\\1 Revit\\4 Family Development\\OCTA-Verandah-Lacework Frieze (Heritage)",
+  "parameters": [
+    { "name": "Length", "instance": true, "default": 4350 },
+    { "name": "Frieze Height", "default": 890 },
+    { "name": "Top Rail", "default": 100 },
+    { "name": "Bottom Rail", "default": 45 },
+    { "name": "Rail Depth", "default": 75 },
+    { "name": "Panel Thickness", "default": 15 },
+    { "name": "Rail Material", "kind": "material" },
+    { "name": "Lacework Material", "kind": "material" }
+  ],
+  "planes": [
+    { "name": "END", "axis": "x", "offset": 4350, "reference": "Right" },
+    { "name": "RO", "axis": "y", "offset": 37.5 },
+    { "name": "RI", "axis": "y", "offset": -37.5 },
+    { "name": "PO", "axis": "y", "offset": 7.5 },
+    { "name": "PI", "axis": "y", "offset": -7.5 },
+    { "name": "BRT", "axis": "z", "offset": 45 },
+    { "name": "TRB", "axis": "z", "offset": 790 },
+    { "name": "TOP", "axis": "z", "offset": 890, "reference": "Top" }
+  ],
+  "references": { "CX": "Left" },
+  "dimensions": [
+    { "planes": ["CX", "END"], "parameter": "Length" },
+    { "planes": ["RI", "CY", "RO"], "equal": true },
+    { "planes": ["RI", "RO"], "parameter": "Rail Depth" },
+    { "planes": ["PI", "CY", "PO"], "equal": true },
+    { "planes": ["PI", "PO"], "parameter": "Panel Thickness" },
+    { "planes": ["LEVEL", "BRT"], "parameter": "Bottom Rail" },
+    { "planes": ["LEVEL", "TOP"], "parameter": "Frieze Height" },
+    { "planes": ["TRB", "TOP"], "parameter": "Top Rail" }
+  ],
+  "boxes": [
+    { "x": ["CX", "END"], "y": ["RI", "RO"], "z": ["LEVEL", "BRT"], "material": "Rail Material" },
+    { "x": ["CX", "END"], "y": ["RI", "RO"], "z": ["TRB", "TOP"], "material": "Rail Material" },
+    { "x": ["CX", "END"], "y": ["PI", "PO"], "z": ["BRT", "TRB"], "material": "Lacework Material" }
+  ],
+  "types": [
+    { "name": "Cast Iron 890", "values": {} },
+    { "name": "Cast Iron 600", "values": { "Frieze Height": 600 } }
+  ],
+  "scenarios": [
+    { "name": "Short bay 1588", "values": { "Length": 1588 } },
+    { "name": "Long bay 6030", "values": { "Length": 6030 } }
+  ]
+}

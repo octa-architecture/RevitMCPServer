@@ -222,6 +222,8 @@ export function registerOctaRevitTools(
     {
       name: z.string().describe("e.g. 'OCTA-Joinery-Base Cabinet'"),
       category: z.string().optional().describe("e.g. 'Casework', 'Furniture', 'Specialty Equipment'. Default Generic Models."),
+      template: z.string().optional().describe("'generic' (default), 'window', 'door' (wall-hosted, with the template's own planes such as Left/Right/Sill/Head/Exterior/Interior and Width/Height), or an .rft path."),
+      inspectTemplate: z.boolean().optional().describe("Return the template's planes (mm), parameters and views without building anything."),
       folder: z.string().optional(),
       load: z.boolean().optional(),
       parameters: z.array(z.object({ name: z.string(), kind: z.enum(["length", "yesno", "material"]).optional(),
@@ -311,6 +313,20 @@ export function registerOctaRevitTools(
       closeGapsM: z.number().optional().describe("Bridge door/window gaps up to this width with room separation lines (default 1.5)"),
       replace: z.boolean().optional().describe("Clear this level's rooms, separation lines and phase floors from a previous run first"), dryRun },
     fwdWrite("create_rooms_and_floors"));
+
+  tool("revit_export_point_cloud_points",
+    "Write raw point-cloud points (x,y,z metres internal + r,g,b) inside a 3D box to a CSV on this PC, e.g. a thin slab in front of a facade to draw an elevation of windows, mouldings and lacework.",
+    { instanceId: z.number().int(), minM: pt, maxM: pt, spacingMm: z.number().optional(), maxPoints: z.number().int().optional(), outPath: z.string() },
+    fwd("export_point_cloud_points"));
+
+  tool("revit_place_openings_batch",
+    "Place surveyed doors/windows: each {family, widthMm, heightMm, x, y (centre, m internal), sillRL, outside?[x,y], params?, comments?}. Hosts on the nearest wall, makes a 'WWWW x HHHH' type per size, sets Wall Thickness from the host, Existing phase by default. Never sets Mark.",
+    { openings: z.array(z.object({ family: z.string(), widthMm: z.number(), heightMm: z.number(), x: z.number(), y: z.number(), sillRL: z.number(),
+        outside: z.array(z.number()).length(2).optional(), params: z.record(z.union([z.number(), z.boolean(), z.string()])).optional(), comments: z.string().optional() })).min(1),
+      levelName: z.string(), phase: z.string().optional(), dryRun }, fwdWrite("place_openings_batch"));
+  tool("revit_import_mesh_directshape",
+    "Import meshes (e.g. Rhino render meshes or scan meshes, already in internal metres) from a JSON file on this PC as DirectShapes: [{name, category?, vertices, faces, comments?}].",
+    { path: z.string(), phase: z.string().optional(), category: z.string().optional(), dryRun }, fwdWrite("import_mesh_directshape"));
 
   // ── Template / standards ─────────────────────────────────────────────────
   const namesOrAll = z.union([z.array(z.string()), z.literal("all")]).optional();

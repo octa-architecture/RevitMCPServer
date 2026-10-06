@@ -261,6 +261,59 @@ public sealed class LinkPointCloudCommand : IRevitCommand
 /// maxM {x,y}, cellM? (0.5), stat? median|min, maxPointsPerCall? (1,000,000).
 /// Returns points [x,y,z] in metres (internal coordinates) and stats.
 /// </summary>
+/// <summary>
+/// Raw point-cloud points (model coordinates, metres, with RGB) inside a 3D box, written to a CSV
+/// file on this PC (x,y,z,r,g,b) — for facade elevations and section slices of scanned buildings.
+/// Params: instanceId, minM {x,y,z}, maxM {x,y,z}, spacingMm? (10), maxPoints? (999999), outPath.
+/// </summary>
+public sealed class ExportPointCloudPointsCommand : IRevitCommand
+{
+    public string Name => "export_point_cloud_points";
+    public bool IsReadOnly => true;
+
+    public JsonNode? Execute(CommandContext ctx)
+    {
+        var doc = ctx.RequireDoc();
+        var p = ctx.Parameters;
+        var inst = doc.GetElement(new ElementId(P.Long(p, "instanceId"))) as PointCloudInstance
+            ?? throw new RevitCommandException("not_found", "instanceId is not a point cloud.");
+        double ft = P.MetersToFeet;
+        var min = OctaUtil.PointParam(p, "minM", ft);
+        var max = OctaUtil.PointParam(p, "maxM", ft);
+        var spacing = P.DblOr(p, "spacingMm", 10) / 304.8;
+        var maxPts = Math.Clamp(P.IntOr(p, "maxPoints", 999_999), 1, 999_999);
+        var path = P.Str(p, "outPath");
+        var tf = inst.GetTotalTransform();
+        var filter = PointCloudFilterFactory.CreateMultiPlaneFilter(new List<Plane>
+        {
+            Plane.CreateByNormalAndOrigin(XYZ.BasisX, min), Plane.CreateByNormalAndOrigin(-XYZ.BasisX, max),
+            Plane.CreateByNormalAndOrigin(XYZ.BasisY, min), Plane.CreateByNormalAndOrigin(-XYZ.BasisY, max),
+            Plane.CreateByNormalAndOrigin(XYZ.BasisZ, min), Plane.CreateByNormalAndOrigin(-XYZ.BasisZ, max),
+        });
+        var pts = inst.GetPoints(filter, spacing, maxPts);
+        var raw = pts.Cast<CloudPoint>().ToList();
+        // Same frame detection as the grid sampler: are returned points already in model space?
+        int inside = raw.Take(2000).Count(q => q.X >= min.X && q.X <= max.X && q.Y >= min.Y && q.Y <= max.Y);
+        bool model = raw.Count > 0 && inside >= Math.Min(2000, raw.Count) * 0.8;
+        var sb = new System.Text.StringBuilder();
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        int n = 0;
+        foreach (var cp in raw)
+        {
+            var w = model ? new XYZ(cp.X, cp.Y, cp.Z) : tf.OfPoint(new XYZ(cp.X, cp.Y, cp.Z));
+            if (w.X < min.X || w.X > max.X || w.Y < min.Y || w.Y > max.Y || w.Z < min.Z || w.Z > max.Z) continue;
+            int c = cp.Color;   // Revit packs colour as 0x00BBGGRR
+            sb.Append((w.X * P.FeetToMeters).ToString("0.###", inv)).Append(',')
+              .Append((w.Y * P.FeetToMeters).ToString("0.###", inv)).Append(',')
+              .Append((w.Z * P.FeetToMeters).ToString("0.###", inv)).Append(',')
+              .Append(c & 0xFF).Append(',').Append((c >> 8) & 0xFF).Append(',').Append((c >> 16) & 0xFF).Append('\n');
+            n++;
+        }
+        System.IO.File.WriteAllText(path, sb.ToString());
+        return new JsonObject { ["points"] = n, ["returned"] = raw.Count, ["frame"] = model ? "model" : "cloud", ["outPath"] = path, ["capped"] = raw.Count >= maxPts };
+    }
+}
+
 public sealed class SamplePointCloudGridCommand : IRevitCommand
 {
     public string Name => "sample_point_cloud_grid";

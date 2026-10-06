@@ -1,0 +1,731 @@
+﻿{
+    "parameters":  [
+                       {
+                           "default":  820,
+                           "name":  "Width"
+                       },
+                       {
+                           "default":  2040,
+                           "name":  "Height"
+                       },
+                       {
+                           "instance":  true,
+                           "default":  270,
+                           "name":  "Wall Thickness"
+                       },
+                       {
+                           "instance":  true,
+                           "default":  135,
+                           "name":  "Half Wall",
+                           "formula":  "Wall Thickness / 2"
+                       },
+                       {
+                           "default":  30,
+                           "name":  "Lining Thickness"
+                       },
+                       {
+                           "default":  45,
+                           "name":  "Leaf Thickness"
+                       },
+                       {
+                           "default":  18,
+                           "name":  "Panel Thickness"
+                       },
+                       {
+                           "default":  115,
+                           "name":  "Stile Width"
+                       },
+                       {
+                           "default":  115,
+                           "name":  "Top Rail"
+                       },
+                       {
+                           "default":  200,
+                           "name":  "Lock Rail"
+                       },
+                       {
+                           "default":  230,
+                           "name":  "Bottom Rail"
+                       },
+                       {
+                           "default":  110,
+                           "name":  "Muntin"
+                       },
+                       {
+                           "default":  860,
+                           "name":  "Lock Rail Bottom"
+                       },
+                       {
+                           "default":  10,
+                           "name":  "Undercut"
+                       },
+                       {
+                           "default":  120,
+                           "name":  "Architrave Width"
+                       },
+                       {
+                           "default":  22,
+                           "name":  "Architrave Thickness"
+                       },
+                       {
+                           "instance":  true,
+                           "default":  true,
+                           "name":  "Architrave Both Sides",
+                           "kind":  "yesno"
+                       },
+                       {
+                           "kind":  "material",
+                           "name":  "Leaf Material"
+                       },
+                       {
+                           "kind":  "material",
+                           "name":  "Lining Material"
+                       },
+                       {
+                           "kind":  "material",
+                           "name":  "Architrave Material"
+                       }
+                   ],
+    "dimensions":  [
+                       {
+                           "planes":  [
+                                          "Reference Plane",
+                                          "EXT"
+                                      ],
+                           "parameter":  "Half Wall"
+                       },
+                       {
+                           "planes":  [
+                                          "INT",
+                                          "Reference Plane"
+                                      ],
+                           "parameter":  "Half Wall"
+                       },
+                       {
+                           "planes":  [
+                                          "LI",
+                                          "Reference Plane",
+                                          "LO"
+                                      ],
+                           "equal":  true
+                       },
+                       {
+                           "planes":  [
+                                          "LI",
+                                          "LO"
+                                      ],
+                           "parameter":  "Leaf Thickness"
+                       },
+                       {
+                           "planes":  [
+                                          "PI",
+                                          "Reference Plane",
+                                          "PO"
+                                      ],
+                           "equal":  true
+                       },
+                       {
+                           "planes":  [
+                                          "PI",
+                                          "PO"
+                                      ],
+                           "parameter":  "Panel Thickness"
+                       },
+                       {
+                           "planes":  [
+                                          "AI",
+                                          "INT"
+                                      ],
+                           "parameter":  "Architrave Thickness"
+                       },
+                       {
+                           "planes":  [
+                                          "EXT",
+                                          "AE"
+                                      ],
+                           "parameter":  "Architrave Thickness"
+                       },
+                       {
+                           "planes":  [
+                                          "Left",
+                                          "JL"
+                                      ],
+                           "parameter":  "Lining Thickness"
+                       },
+                       {
+                           "planes":  [
+                                          "JR",
+                                          "Right"
+                                      ],
+                           "parameter":  "Lining Thickness"
+                       },
+                       {
+                           "planes":  [
+                                          "JL",
+                                          "SL"
+                                      ],
+                           "parameter":  "Stile Width"
+                       },
+                       {
+                           "planes":  [
+                                          "SR",
+                                          "JR"
+                                      ],
+                           "parameter":  "Stile Width"
+                       },
+                       {
+                           "planes":  [
+                                          "ML",
+                                          "CX",
+                                          "MR"
+                                      ],
+                           "equal":  true
+                       },
+                       {
+                           "planes":  [
+                                          "ML",
+                                          "MR"
+                                      ],
+                           "parameter":  "Muntin"
+                       },
+                       {
+                           "planes":  [
+                                          "AL",
+                                          "Left"
+                                      ],
+                           "parameter":  "Architrave Width"
+                       },
+                       {
+                           "planes":  [
+                                          "Right",
+                                          "AR"
+                                      ],
+                           "parameter":  "Architrave Width"
+                       },
+                       {
+                           "planes":  [
+                                          "LEVEL",
+                                          "HEAD"
+                                      ],
+                           "parameter":  "Height"
+                       },
+                       {
+                           "planes":  [
+                                          "HL",
+                                          "HEAD"
+                                      ],
+                           "parameter":  "Lining Thickness"
+                       },
+                       {
+                           "planes":  [
+                                          "LEVEL",
+                                          "UC"
+                                      ],
+                           "parameter":  "Undercut"
+                       },
+                       {
+                           "planes":  [
+                                          "UC",
+                                          "BRT"
+                                      ],
+                           "parameter":  "Bottom Rail"
+                       },
+                       {
+                           "planes":  [
+                                          "LEVEL",
+                                          "LRB"
+                                      ],
+                           "parameter":  "Lock Rail Bottom"
+                       },
+                       {
+                           "planes":  [
+                                          "LRB",
+                                          "LRT"
+                                      ],
+                           "parameter":  "Lock Rail"
+                       },
+                       {
+                           "planes":  [
+                                          "HEAD",
+                                          "AT"
+                                      ],
+                           "parameter":  "Architrave Width"
+                       },
+                       {
+                           "planes":  [
+                                          "TRB",
+                                          "HL"
+                                      ],
+                           "parameter":  "Top Rail"
+                       }
+                   ],
+    "types":  [
+                  {
+                      "name":  "0820 x 2040",
+                      "values":  {
+                                     "Height":  2040,
+                                     "Width":  820
+                                 }
+                  },
+                  {
+                      "name":  "0720 x 2040",
+                      "values":  {
+                                     "Height":  2040,
+                                     "Width":  720
+                                 }
+                  },
+                  {
+                      "name":  "0920 x 2100",
+                      "values":  {
+                                     "Height":  2100,
+                                     "Width":  920
+                                 }
+                  }
+              ],
+    "template":  "door",
+    "planes":  [
+                   {
+                       "offset":  135,
+                       "name":  "EXT",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  -135,
+                       "name":  "INT",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  22.5,
+                       "name":  "LO",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  -22.5,
+                       "name":  "LI",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  9,
+                       "name":  "PO",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  -9,
+                       "name":  "PI",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  -157,
+                       "name":  "AI",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  157,
+                       "name":  "AE",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  -380,
+                       "name":  "JL",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  380,
+                       "name":  "JR",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  -265,
+                       "name":  "SL",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  265,
+                       "name":  "SR",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  -55,
+                       "name":  "ML",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  55,
+                       "name":  "MR",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  -530,
+                       "name":  "AL",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  530,
+                       "name":  "AR",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  2040,
+                       "name":  "HEAD",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  2010,
+                       "name":  "HL",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  10,
+                       "name":  "UC",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  240,
+                       "name":  "BRT",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  860,
+                       "name":  "LRB",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  1060,
+                       "name":  "LRT",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  2160,
+                       "name":  "AT",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  1895,
+                       "name":  "TRB",
+                       "axis":  "z"
+                   }
+               ],
+    "scenarios":  [
+                      {
+                          "name":  "120 stud wall, one-sided architrave",
+                          "values":  {
+                                         "Wall Thickness":  120,
+                                         "Architrave Both Sides":  false
+                                     }
+                      },
+                      {
+                          "name":  "350 brick",
+                          "values":  {
+                                         "Wall Thickness":  350
+                                     }
+                      }
+                  ],
+    "name":  "OCTA-Door-Four Panel (Heritage)",
+    "folder":  "H:\\Shared drives\\OCTA\\3 Standards \u0026 Library\\1 Revit\\4 Family Development\\OCTA-Door-Four Panel (Heritage)",
+    "boxes":  [
+                  {
+                      "y":  [
+                                "INT",
+                                "EXT"
+                            ],
+                      "material":  "Lining Material",
+                      "z":  [
+                                "LEVEL",
+                                "HEAD"
+                            ],
+                      "x":  [
+                                "Left",
+                                "JL"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "INT",
+                                "EXT"
+                            ],
+                      "material":  "Lining Material",
+                      "z":  [
+                                "LEVEL",
+                                "HEAD"
+                            ],
+                      "x":  [
+                                "JR",
+                                "Right"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "INT",
+                                "EXT"
+                            ],
+                      "material":  "Lining Material",
+                      "z":  [
+                                "HL",
+                                "HEAD"
+                            ],
+                      "x":  [
+                                "JL",
+                                "JR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "LI",
+                                "LO"
+                            ],
+                      "material":  "Leaf Material",
+                      "z":  [
+                                "UC",
+                                "HL"
+                            ],
+                      "x":  [
+                                "JL",
+                                "SL"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "LI",
+                                "LO"
+                            ],
+                      "material":  "Leaf Material",
+                      "z":  [
+                                "UC",
+                                "HL"
+                            ],
+                      "x":  [
+                                "SR",
+                                "JR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "LI",
+                                "LO"
+                            ],
+                      "material":  "Leaf Material",
+                      "z":  [
+                                "UC",
+                                "BRT"
+                            ],
+                      "x":  [
+                                "SL",
+                                "SR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "LI",
+                                "LO"
+                            ],
+                      "material":  "Leaf Material",
+                      "z":  [
+                                "LRB",
+                                "LRT"
+                            ],
+                      "x":  [
+                                "SL",
+                                "SR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "LI",
+                                "LO"
+                            ],
+                      "material":  "Leaf Material",
+                      "z":  [
+                                "TRB",
+                                "HL"
+                            ],
+                      "x":  [
+                                "SL",
+                                "SR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "LI",
+                                "LO"
+                            ],
+                      "material":  "Leaf Material",
+                      "z":  [
+                                "BRT",
+                                "LRB"
+                            ],
+                      "x":  [
+                                "ML",
+                                "MR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "LI",
+                                "LO"
+                            ],
+                      "material":  "Leaf Material",
+                      "z":  [
+                                "LRT",
+                                "TRB"
+                            ],
+                      "x":  [
+                                "ML",
+                                "MR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "PI",
+                                "PO"
+                            ],
+                      "material":  "Leaf Material",
+                      "z":  [
+                                "BRT",
+                                "LRB"
+                            ],
+                      "x":  [
+                                "SL",
+                                "ML"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "PI",
+                                "PO"
+                            ],
+                      "material":  "Leaf Material",
+                      "z":  [
+                                "BRT",
+                                "LRB"
+                            ],
+                      "x":  [
+                                "MR",
+                                "SR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "PI",
+                                "PO"
+                            ],
+                      "material":  "Leaf Material",
+                      "z":  [
+                                "LRT",
+                                "TRB"
+                            ],
+                      "x":  [
+                                "SL",
+                                "ML"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "PI",
+                                "PO"
+                            ],
+                      "material":  "Leaf Material",
+                      "z":  [
+                                "LRT",
+                                "TRB"
+                            ],
+                      "x":  [
+                                "MR",
+                                "SR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "AI",
+                                "INT"
+                            ],
+                      "material":  "Architrave Material",
+                      "z":  [
+                                "LEVEL",
+                                "AT"
+                            ],
+                      "x":  [
+                                "AL",
+                                "Left"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "AI",
+                                "INT"
+                            ],
+                      "material":  "Architrave Material",
+                      "z":  [
+                                "LEVEL",
+                                "AT"
+                            ],
+                      "x":  [
+                                "Right",
+                                "AR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "AI",
+                                "INT"
+                            ],
+                      "material":  "Architrave Material",
+                      "z":  [
+                                "HEAD",
+                                "AT"
+                            ],
+                      "x":  [
+                                "Left",
+                                "Right"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "EXT",
+                                "AE"
+                            ],
+                      "material":  "Architrave Material",
+                      "visibleIf":  "Architrave Both Sides",
+                      "z":  [
+                                "LEVEL",
+                                "AT"
+                            ],
+                      "x":  [
+                                "AL",
+                                "Left"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "EXT",
+                                "AE"
+                            ],
+                      "material":  "Architrave Material",
+                      "visibleIf":  "Architrave Both Sides",
+                      "z":  [
+                                "LEVEL",
+                                "AT"
+                            ],
+                      "x":  [
+                                "Right",
+                                "AR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "EXT",
+                                "AE"
+                            ],
+                      "material":  "Architrave Material",
+                      "visibleIf":  "Architrave Both Sides",
+                      "z":  [
+                                "HEAD",
+                                "AT"
+                            ],
+                      "x":  [
+                                "Left",
+                                "Right"
+                            ]
+                  }
+              ]
+}
+

@@ -32,6 +32,9 @@ public static class OctaCommands
         r.Register(new CreateMassSurfaceCommand());
         r.Register(new CreateWallsBatchCommand());
         r.Register(new CreateRoomsAndFloorsCommand());
+        r.Register(new ExportPointCloudPointsCommand());
+        r.Register(new PlaceOpeningsBatchCommand());
+        r.Register(new ImportMeshDirectShapeCommand());
         r.Register(new ListPhaseFiltersCommand());
         r.Register(new CreatePhaseFilterCommand());
         r.Register(new SetElementPhaseCommand());

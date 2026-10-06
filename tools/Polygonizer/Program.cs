@@ -17,6 +17,17 @@ if (args[0] == "faces")
     File.WriteAllText(args[2], JsonSerializer.Serialize(faces));
     Console.WriteLine($"{segs.Count} segments -> {faces.Count} faces");
 }
+else if (args[0] == "render")
+{
+    // Polygonizer render <points.csv> <out.png> <west|east|north|south|plan> [pxPerM=100] [rgb|depth]
+    Console.WriteLine(Render.Run(args[1], args[2], args[3], args.Length > 4 ? double.Parse(args[4], inv) : 100, args.Length > 5 ? args[5] : "rgb"));
+}
+else if (args[0] == "rhino")
+{
+    // Polygonizer rhino <export.json> <out.json> <originX> <originY> <thetaDeg> <name> <category> [object|merge]
+    Console.WriteLine(RhinoToRevit.Run(args[1], args[2], double.Parse(args[3], inv), double.Parse(args[4], inv), double.Parse(args[5], inv),
+        args[6], args[7], args.Length > 8 ? args[8] : "merge"));
+}
 else if (args[0] == "walls")
 {
     // Polygonizer walls <segments.json> <out.json>

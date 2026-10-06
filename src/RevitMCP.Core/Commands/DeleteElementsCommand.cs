@@ -24,6 +24,9 @@ public sealed class DeleteElementsCommand : IRevitCommand
     public string Name => "delete_elements";
     public bool IsReadOnly => false;
     public string RiskLevel => "high";
+    // Deleting walls etc. raises join errors at commit; without this a warning dialog's OK cancels
+    // the whole delete. Resolved failures are reported in commitResolved.
+    public bool ResolveErrorsOnCommit => true;
 
     public JsonNode? Execute(CommandContext ctx)
     {
