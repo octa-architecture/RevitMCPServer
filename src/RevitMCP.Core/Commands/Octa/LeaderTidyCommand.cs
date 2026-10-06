@@ -138,6 +138,12 @@ public sealed class TidyTextLeadersCommand : IRevitCommand
 
         bool align = P.BoolOr(p, "alignColumns", true);
         int inline = 0;
+        // Text without leaders (labels like "INSIDE", "50 STEP DOWN", general notes) never moves,
+        // but notes must not be stacked on top of it.
+        var leaderIds = notes.Select(n => n.Id).ToHashSet();
+        var obstacles = new FilteredElementCollector(doc, view.Id).OfClass(typeof(TextNote)).Cast<TextNote>()
+            .Where(n => !leaderIds.Contains(n.Id))
+            .Select(n => LeaderGeom.TextBox(view, n)).ToList();
         if (move)
         {
             // Notes inside the drawing (between the leftmost and rightmost arrow tips) stay where
@@ -176,6 +182,7 @@ public sealed class TidyTextLeadersCommand : IRevitCommand
                     }
                 }
                 if (g.Key == "inline") continue; // inline notes: square leaders only, no reshuffle
+                doc.Regenerate();
                 var items = g.Select(n =>
                 {
                     var leaders = n.GetLeaders().Cast<Leader>().ToList();
@@ -185,12 +192,13 @@ public sealed class TidyTextLeadersCommand : IRevitCommand
                     var h = box.top - box.bottom;
                     var topOffset = box.top - LeaderGeom.V(view, n.Coord);
                     var anchorU = LeaderGeom.U(view, leaders[0].Anchor);
-                    return (note: n, targetV, anchorOffset, h, topOffset, anchorU,
+                    return (note: n, targetV, anchorOffset, h, topOffset, anchorU, left: box.left, right: box.right,
                         ends: leaders.Select(l => l.End).ToList());
                 }).OrderByDescending(x => x.targetV).ToList();
 
                 // Stack notes in a given order: each level with its target if there's room, else
-                // pushed below the note above.
+                // pushed below the note above — and below any other text (labels, general notes)
+                // that sits in the way, so nothing ends up overlapping.
                 List<double> Layout(IList<int> order)
                 {
                     var res = new double[order.Count];
@@ -201,6 +209,22 @@ public sealed class TidyTextLeadersCommand : IRevitCommand
                         var want = it.targetV - it.anchorOffset;
                         var top = want + it.topOffset;
                         if (pb is { } b && top > b - gap) want -= top - (b - gap);
+                        for (int guard = 0; guard < 20; guard++)
+                        {
+                            bool pushed = false;
+                            foreach (var ob in obstacles)
+                            {
+                                if (it.right <= ob.left || it.left >= ob.right) continue;
+                                var t = want + it.topOffset;
+                                var bot = t - it.h;
+                                if (t > ob.bottom - gap && bot < ob.top + gap)
+                                {
+                                    want -= t - (ob.bottom - gap);
+                                    pushed = true;
+                                }
+                            }
+                            if (!pushed) break;
+                        }
                         res[k] = want;
                         pb = want + it.topOffset - it.h;
                     }
@@ -271,6 +295,69 @@ public sealed class TidyTextLeadersCommand : IRevitCommand
         doc.Regenerate();
         int after = LeaderGeom.Crossings(view, notes);
 
+        // Shared drops: leaders whose vertical drops sit on the same line read as one leader.
+        // Nudge their tips apart along the element (a millimetre or two on paper), ordered so the
+        // nested drops don't cross; keep the change only if crossings don't get worse.
+        int separated = 0, dropGroups = 0, revertedAt = -1;
+        if (P.BoolOr(p, "separateDrops", true))
+        {
+            var spacing = P.DblOr(p, "dropSpacingMm", 1.5) / 304.8 * view.Scale;
+            var drops = notes.SelectMany(n => n.GetLeaders().Cast<Leader>().Select(l => (n, l))).Where(x =>
+                    Math.Abs(LeaderGeom.V(view, x.l.End) - LeaderGeom.V(view, x.l.Anchor)) > 1e-4)
+                .Select(x => (x.n, x.l, tipU: LeaderGeom.U(view, x.l.End), tipV: LeaderGeom.V(view, x.l.End),
+                    shV: LeaderGeom.V(view, x.l.Anchor), side: LeaderGeom.U(view, x.l.Anchor) > LeaderGeom.U(view, x.l.End) ? 1 : -1))
+                .ToList();
+            var original = drops.Select(d => (d.l, end: d.l.End)).ToList();
+            var used = new HashSet<int>();
+            for (int i = 0; i < drops.Count; i++)
+            {
+                if (used.Contains(i)) continue;
+                var group = new List<int> { i };
+                for (int j = i + 1; j < drops.Count; j++)
+                {
+                    if (used.Contains(j) || drops[j].side != drops[i].side) continue;
+                    if (Math.Abs(drops[j].tipU - drops[i].tipU) > spacing * 0.7) continue;
+                    double a0 = Math.Min(drops[i].tipV, drops[i].shV), a1 = Math.Max(drops[i].tipV, drops[i].shV);
+                    double b0 = Math.Min(drops[j].tipV, drops[j].shV), b1 = Math.Max(drops[j].tipV, drops[j].shV);
+                    if (a1 < b0 || b1 < a0) continue;
+                    group.Add(j);
+                }
+                if (group.Count < 2) continue;
+                dropGroups++;
+                foreach (var gi in group) used.Add(gi);
+                bool down = drops[i].tipV < drops[i].shV;
+                // Each group is tried on its own, with both spreading directions and both nesting
+                // orders; the first variant that adds no crossings is kept, otherwise the group is
+                // left as it was.
+                var starts = group.Select(k => (drops[k].l, end: drops[k].l.End)).ToList();
+                bool kept = false;
+                foreach (var awayFromColumn in new[] { true, false })
+                foreach (var nestFirst in new[] { true, false })
+                {
+                    if (kept) break;
+                    var ordered = (down ^ !nestFirst ? group.OrderByDescending(k => drops[k].shV) : group.OrderBy(k => drops[k].shV)).ToList();
+                    int moves = 0;
+                    for (int k = 0; k < ordered.Count; k++)
+                    {
+                        var d = drops[ordered[k]];
+                        var dir = awayFromColumn ? -d.side : d.side;
+                        var shift = dir * (ordered.Count - 1 - k) * spacing;
+                        if (Math.Abs(shift) < 1e-9) continue;
+                        LeaderGeom.SetEnd(d.l, d.l.End + view.RightDirection * shift);
+                        LeaderGeom.Orthogonalise(view, d.l);
+                        moves++;
+                    }
+                    doc.Regenerate();
+                    var c = LeaderGeom.Crossings(view, notes);
+                    if (c <= after) { after = c; separated += moves; kept = true; break; }
+                    revertedAt = c;
+                    foreach (var (l, end) in starts) { LeaderGeom.SetEnd(l, end); LeaderGeom.Orthogonalise(view, l); }
+                    doc.Regenerate();
+                    if (kept) break;
+                }
+            }
+        }
+
         return new JsonObject
         {
             ["affected"] = Affected.Modified(notes.Select(n => n.Id.Value)),
@@ -278,6 +365,10 @@ public sealed class TidyTextLeadersCommand : IRevitCommand
             ["notes"] = notes.Count,
             ["moved"] = moved,
             ["inlineNotes"] = inline,
+            ["obstacles"] = obstacles.Count,
+            ["dropsSeparated"] = separated,
+            ["dropGroups"] = dropGroups,
+            ["dropRevertCrossings"] = revertedAt,
             ["crossingsBefore"] = before,
             ["crossingsAfter"] = after,
             ["note"] = after > 0 ? "Some crossings remain — usually two notes on the same side pointing past each other; consider moving one to the other side." : null,

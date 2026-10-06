@@ -76,13 +76,15 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                 t.Start();
                 if (mgr.CurrentType is null) mgr.NewType(name);
 
+                // Category is set AFTER the parameters (below): categories like Casework bring built-in
+                // Width/Depth/Height that are locked as type parameters. Creating our own first (as the
+                // OCTA joinery families do) lets them be instance parameters.
+                Category? targetCategory = null;
                 if (P.StrOrNull(p, "category") is { } catName)
                 {
-                    Category? cat = null;
                     foreach (Category c in fam.Settings.Categories)
-                        if (c.Name.Equals(catName, StringComparison.OrdinalIgnoreCase)) { cat = c; break; }
-                    if (cat is null) throw new RevitCommandException("not_found", $"Category '{catName}' not found.");
-                    fam.OwnerFamily.FamilyCategory = cat;
+                        if (c.Name.Equals(catName, StringComparison.OrdinalIgnoreCase)) { targetCategory = c; break; }
+                    if (targetCategory is null) throw new RevitCommandException("not_found", $"Category '{catName}' not found.");
                 }
 
                 foreach (var rp in new FilteredElementCollector(fam).OfClass(typeof(ReferencePlane)).Cast<ReferencePlane>())
@@ -93,11 +95,16 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                 var level = new FilteredElementCollector(fam).OfClass(typeof(Level)).Cast<Level>().First();
                 planes["LEVEL"] = new PlaneRef { Axis = 'z', Level = level };
 
+                // Pass 1: length / yes-no parameters, then the category, then (pass 2) materials —
+                // changing category invalidates material parameters created before it.
+                void AddParams(bool materials)
+                {
                 foreach (var node in p["parameters"] as JsonArray ?? new JsonArray())
                 {
                     if (node is not JsonObject o) continue;
                     var pn = P.Str(o, "name");
                     var kind = (P.StrOrNull(o, "kind") ?? "length").ToLowerInvariant();
+                    if ((kind == "material") != materials) continue;
                     var (spec, group) = kind switch
                     {
                         "yesno" => (SpecTypeId.Boolean.YesNo, GroupTypeId.Graphics),
@@ -105,10 +112,28 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                         _ => (SpecTypeId.Length, GroupTypeId.Geometry),
                     };
                     // Categories like Casework already have Width/Depth/Height: reuse them (schedules/tags use them).
-                    var fp = mgr.get_Parameter(pn) ?? mgr.AddParameter(pn, group, spec, P.BoolOr(o, "instance", false));
+                    var wantInstance = P.BoolOr(o, "instance", false);
+                    var fp = mgr.get_Parameter(pn) ?? mgr.AddParameter(pn, group, spec, wantInstance);
+                    // Built-ins (e.g. Casework Width/Depth/Height) start as type parameters.
+                    if (wantInstance && !fp.IsInstance) mgr.MakeInstance(fp);
                     famParams[pn] = fp;
-                    if (o["default"] is not null && kind != "material") SetFamParam(mgr, fp, o["default"]);
+                    if (o["default"] is not null && kind != "material" && o["formula"] is null) SetFamParam(mgr, fp, o["default"]);
                 }
+                }
+                AddParams(materials: false);
+                if (targetCategory is not null)
+                {
+                    try { fam.OwnerFamily.FamilyCategory = targetCategory; }
+                    catch (Exception ex)
+                    {
+                        throw new RevitCommandException("invalid_parameter",
+                            $"Couldn't set category '{targetCategory.Name}' after creating parameters: {ex.Message}");
+                    }
+                    // Re-resolve in case the category swapped in built-ins with the same names.
+                    foreach (var key in famParams.Keys.ToList())
+                        if (mgr.get_Parameter(key) is { } cur) famParams[key] = cur;
+                }
+                AddParams(materials: true);
 
                 foreach (var node in P.Arr(p, "planes"))
                 {
@@ -152,6 +177,19 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                 }
                 fam.Regenerate();
 
+                // Formulas (after every parameter exists): e.g. "and(Top Rail On Flat, not(Solid Top))".
+                foreach (var node in p["parameters"] as JsonArray ?? new JsonArray())
+                {
+                    if (node is not JsonObject o || P.StrOrNull(o, "formula") is not { } formula) continue;
+                    var fp = famParams[P.Str(o, "name")];
+                    try { mgr.SetFormula(fp, formula); }
+                    catch (Exception ex)
+                    {
+                        throw new RevitCommandException("invalid_parameter", $"Formula for '{fp.Definition.Name}' rejected: {ex.Message}");
+                    }
+                }
+                fam.Regenerate();
+
                 int bi = 0;
                 foreach (var node in P.Arr(p, "boxes"))
                 {
@@ -181,6 +219,18 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                     if (P.StrOrNull(o, "material") is { } mat && !isVoid)
                         mgr.AssociateElementParameterToFamilyParameter(ext.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM),
                             famParams.TryGetValue(mat, out var mp) ? mp : throw new RevitCommandException("not_found", $"material '{mat}' isn't a parameter."));
+                    // Detail level: "fine" (construction panels), "coarse-medium" (simple envelope), default all.
+                    var detail = (P.StrOrNull(o, "detail") ?? "all").ToLowerInvariant();
+                    if (detail != "all")
+                    {
+                        var detailVis = new FamilyElementVisibility(FamilyElementVisibilityType.Model)
+                        {
+                            IsShownInCoarse = detail.Contains("coarse"),
+                            IsShownInMedium = detail.Contains("medium"),
+                            IsShownInFine = detail.Contains("fine"),
+                        };
+                        ext.SetVisibility(detailVis);
+                    }
                     boxes.Add((ext, xs, ys, zs, $"box {bi}"));
                 }
                 fam.Regenerate();
@@ -230,6 +280,38 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                             SetFamParam(mgr, famParams.TryGetValue(kv.Key, out var fp) ? fp
                                 : throw new RevitCommandException("not_found", $"Type value '{kv.Key}' isn't a parameter."), kv.Value);
                     fam.Regenerate();
+                    var errs = CheckBoxes();
+                    allPassed &= errs.Count == 0;
+                    flex.Add(new JsonObject { ["type"] = tName, ["passed"] = errs.Count == 0, ["errors"] = new JsonArray(errs.Select(e => (JsonNode)e).ToArray()) });
+                }
+
+                // Scenarios: instance-parameter combinations (tick boxes, sizes) flexed on the first type
+                // and then reset, so every combination a user can pick is proven, not just the types.
+                var firstType = typeNodes[0];
+                foreach (var sn in (p["scenarios"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+                {
+                    var sName = P.Str(sn, "name");
+                    mgr.CurrentType = mgr.Types.Cast<FamilyType>().First(ft => ft.Name == P.Str(firstType, "name"));
+                    if (sn["values"] is JsonObject vals)
+                        foreach (var kv in vals)
+                            SetFamParam(mgr, famParams.TryGetValue(kv.Key, out var fp) ? fp
+                                : throw new RevitCommandException("not_found", $"Scenario value '{kv.Key}' isn't a parameter."), kv.Value);
+                    fam.Regenerate();
+                    var errs = CheckBoxes();
+                    allPassed &= errs.Count == 0;
+                    flex.Add(new JsonObject { ["scenario"] = sName, ["passed"] = errs.Count == 0, ["errors"] = new JsonArray(errs.Select(e => (JsonNode)e).ToArray()) });
+                    // Reset to the declared defaults + the first type's own values.
+                    foreach (var dn in (p["parameters"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+                        if (dn["default"] is not null && famParams.TryGetValue(P.Str(dn, "name"), out var dfp))
+                            SetFamParam(mgr, dfp, dn["default"]);
+                    if (firstType["values"] is JsonObject fv)
+                        foreach (var kv in fv) SetFamParam(mgr, famParams[kv.Key], kv.Value);
+                    fam.Regenerate();
+                }
+                t.Commit();
+
+                List<string> CheckBoxes()
+                {
                     var errs = new List<string>();
                     foreach (var (form, xs, ys, zs, label) in boxes)
                     {
@@ -246,10 +328,8 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                         Expect("bottom", bb.Min.Z, Math.Min(zs[0].Position, zs[1].Position));
                         Expect("top", bb.Max.Z, Math.Max(zs[0].Position, zs[1].Position));
                     }
-                    allPassed &= errs.Count == 0;
-                    flex.Add(new JsonObject { ["type"] = tName, ["passed"] = errs.Count == 0, ["errors"] = new JsonArray(errs.Select(e => (JsonNode)e).ToArray()) });
+                    return errs;
                 }
-                t.Commit();
             }
 
             string? savedPath = null;
@@ -280,6 +360,12 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                 ["note"] = allPassed ? (ctx.DryRun ? "Dry run: not saved." : null)
                     : "Flex test failed: nothing saved. Usually a face that isn't dimensioned to a parameter or locked.",
             };
+        }
+        catch (Exception ex) when (ex is NullReferenceException or InvalidOperationException)
+        {
+            // Unexpected internal failure: report where, so it can be fixed rather than guessed at.
+            var frame = ex.StackTrace?.Split('\n').FirstOrDefault(l => l.Contains("CreateModelFamilyCommand"))?.Trim();
+            throw new RevitCommandException("command_failed", $"{ex.GetType().Name}: {ex.Message} at {frame}");
         }
         finally
         {
@@ -312,6 +398,7 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
 
     private static void SetFamParam(FamilyManager mgr, FamilyParameter fp, JsonNode? value)
     {
+        if (!string.IsNullOrEmpty(fp.Formula)) return; // driven by a formula
         var dt = fp.Definition.GetDataType();
         if (dt == SpecTypeId.Boolean.YesNo)
             mgr.Set(fp, value is JsonValue v && v.TryGetValue<bool>(out var b) ? (b ? 1 : 0) : P.IntFrom(value, fp.Definition.Name));

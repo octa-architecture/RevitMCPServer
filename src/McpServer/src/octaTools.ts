@@ -225,14 +225,18 @@ export function registerOctaRevitTools(
       folder: z.string().optional(),
       load: z.boolean().optional(),
       parameters: z.array(z.object({ name: z.string(), kind: z.enum(["length", "yesno", "material"]).optional(),
-        instance: z.boolean().optional(), default: z.union([z.number(), z.boolean()]).optional() })).optional(),
+        instance: z.boolean().optional(), default: z.union([z.number(), z.boolean()]).optional(),
+        formula: z.string().optional().describe("Revit formula, e.g. 'and(Top Rail On Flat, not(Solid Top))' or 'Kick Height + Height'.") })).optional(),
       planes: z.array(z.object({ name: z.string(), axis: z.enum(["x", "y", "z"]), offset: z.number() })),
       dimensions: z.array(z.object({ planes: z.array(z.string()).min(2), parameter: z.string().optional(),
         equal: z.boolean().optional() })).optional(),
       boxes: z.array(z.object({ x: z.tuple([z.string(), z.string()]), y: z.tuple([z.string(), z.string()]),
         z: z.tuple([z.string(), z.string()]), void: z.boolean().optional(), visibleIf: z.string().optional(),
-        material: z.string().optional() })).min(1),
+        material: z.string().optional(),
+        detail: z.enum(["all", "fine", "coarse-medium"]).optional().describe("'fine' = construction parts; 'coarse-medium' = simple envelope.") })).min(1),
       types: z.array(z.object({ name: z.string(), values: z.record(z.union([z.number(), z.boolean()])).optional() })).optional(),
+      scenarios: z.array(z.object({ name: z.string(), values: z.record(z.union([z.number(), z.boolean()])) })).optional()
+        .describe("Instance-parameter combinations (tick boxes, sizes) flex-tested on the first type, not saved as types."),
       dryRun,
     }, fwdWrite("create_model_family"));
 
