@@ -60,21 +60,37 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
         var fam = ctx.App.Application.NewFamilyDocument(Template)
             ?? throw new RevitCommandException("command_failed", "Revit couldn't create a family document.");
         var warnings = new JsonArray();
+        var stage = "start";
         try
         {
-            var plan = new FilteredElementCollector(fam).OfClass(typeof(ViewPlan)).Cast<ViewPlan>().First(v => !v.IsTemplate);
+            // The template has a floor AND a ceiling plan; collector order varies, and dimensions/locks
+            // fail in the ceiling plan — always use the floor plan.
+            var plan = new FilteredElementCollector(fam).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
+                .Where(v => !v.IsTemplate).OrderBy(v => v.ViewType == ViewType.FloorPlan ? 0 : 1).First();
             var front = new FilteredElementCollector(fam).OfClass(typeof(View)).Cast<View>()
                 .FirstOrDefault(v => !v.IsTemplate && v.ViewType == ViewType.Elevation && v.Name.Contains("Front"))
                 ?? throw new RevitCommandException("command_failed", "Template has no Front elevation.");
             var mgr = fam.FamilyManager;
             var planes = new Dictionary<string, PlaneRef>(StringComparer.OrdinalIgnoreCase);
             var famParams = new Dictionary<string, FamilyParameter>(StringComparer.OrdinalIgnoreCase);
+            // Re-find parameter handles by name, preferring the family's own over a same-named
+            // category built-in. Needed after any regeneration that follows a category change,
+            // which invalidates earlier handles.
+            void RefreshParams()
+            {
+                var live = mgr.Parameters.Cast<FamilyParameter>().Where(x => x.Definition is not null).ToList();
+                foreach (var key in famParams.Keys.ToList())
+                {
+                    var match = live.Where(x => x.Definition.Name == key).OrderByDescending(x => x.Id.Value > 0 ? 1 : 0).FirstOrDefault();
+                    if (match is not null) famParams[key] = match;
+                }
+            }
             var boxes = new List<(GenericForm form, PlaneRef[] x, PlaneRef[] y, PlaneRef[] z, string label)>();
 
             using (var t = new Transaction(fam, "Build family"))
             {
                 t.Start();
-                if (mgr.CurrentType is null) mgr.NewType(name);
+                stage = "new type"; if (mgr.CurrentType is null) mgr.NewType(name);
 
                 // Category is set AFTER the parameters (below): categories like Casework bring built-in
                 // Width/Depth/Height that are locked as type parameters. Creating our own first (as the
@@ -120,21 +136,32 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                     if (o["default"] is not null && kind != "material" && o["formula"] is null) SetFamParam(mgr, fp, o["default"]);
                 }
                 }
-                AddParams(materials: false);
+                stage = "parameters"; AddParams(materials: false);
                 if (targetCategory is not null)
                 {
-                    try { fam.OwnerFamily.FamilyCategory = targetCategory; }
+                    stage = "category"; try { fam.OwnerFamily.FamilyCategory = targetCategory; }
                     catch (Exception ex)
                     {
                         throw new RevitCommandException("invalid_parameter",
                             $"Couldn't set category '{targetCategory.Name}' after creating parameters: {ex.Message}");
                     }
-                    // Re-resolve in case the category swapped in built-ins with the same names.
+                    // Changing category invalidates parameter handles, and a lookup by name can return the
+                    // category's BUILT-IN parameter of the same name (e.g. Casework Width). Re-find each one,
+                    // preferring the family's own (user-defined, positive id) parameter.
+                    var all = mgr.Parameters.Cast<FamilyParameter>().Where(x => x.Definition is not null).ToList();
+                    if (P.BoolOr(p, "debugParams", false))
+                        throw new RevitCommandException("debug", "After category change: " + string.Join("; ",
+                            all.Select(x => $"{x.Definition.Name}#{x.Id.Value}{(x.IsInstance ? "(i)" : "(t)")}")));
                     foreach (var key in famParams.Keys.ToList())
-                        if (mgr.get_Parameter(key) is { } cur) famParams[key] = cur;
+                    {
+                        var match = all.Where(x => x.Definition.Name == key)
+                            .OrderByDescending(x => x.Id.Value > 0 ? 1 : 0).FirstOrDefault();
+                        if (match is not null) famParams[key] = match;
+                    }
                 }
-                AddParams(materials: true);
+                stage = "material parameters"; AddParams(materials: true);
 
+                stage = "planes";
                 foreach (var node in P.Arr(p, "planes"))
                 {
                     if (node is not JsonObject o) continue;
@@ -151,25 +178,45 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                     rp.Name = pn;
                     planes[pn] = new PlaneRef { Axis = axis, Rp = rp };
                 }
+                // Reference types: named references (Left/Right/Front/Back/Top/Bottom) give the
+                // placed family drag handles on instance sizes and clean snapping/dimensioning.
+                // Any plane, including the built-in CX/CY, can be given one via "references".
+                foreach (var node in P.Arr(p, "planes"))
+                    if (node is JsonObject o && P.StrOrNull(o, "reference") is { } rt)
+                        SetReferenceType(planes[P.Str(o, "name")].Rp!, rt);
+                if (p["references"] is JsonObject refMap)
+                    foreach (var kv in refMap)
+                        if (planes.TryGetValue(kv.Key, out var pr) && pr.Rp is not null)
+                            SetReferenceType(pr.Rp, P.StrFrom(kv.Value, kv.Key));
                 fam.Regenerate();
 
+                RefreshParams();
+                stage = "dimensions";
                 foreach (var node in p["dimensions"] as JsonArray ?? new JsonArray())
                 {
                     if (node is not JsonObject o) continue;
                     var names = P.Arr(o, "planes").Select((n, i) => P.StrFrom(n, $"planes[{i}]")).ToList();
+                    stage = $"dimension {string.Join(" / ", names)} ({P.StrOrNull(o, "parameter") ?? "equal"})";
                     var ps = names.Select(n => Get(planes, n)).ToList();
                     var axis = ps[0].Axis;
                     if (ps.Any(x => x.Axis != axis))
                         throw new RevitCommandException("invalid_parameter", $"Dimension planes {string.Join(", ", names)} must share an axis.");
+                    var dimStage = stage;
+                    stage = dimStage + ": references";
                     var refs = new ReferenceArray();
-                    foreach (var x in ps) refs.Append(x.GetReference());
+                    foreach (var x in ps) refs.Append(x.GetReference() ?? throw new RevitCommandException("command_failed", $"A plane in {string.Join(", ", names)} has no reference."));
                     var (view, line) = axis switch
                     {
                         'x' => ((View)plan, Line.CreateBound(new XYZ(-1, -2, 0), new XYZ(1, -2, 0))),
                         'y' => (plan, Line.CreateBound(new XYZ(-2, -1, 0), new XYZ(-2, 1, 0))),
                         _ => (front, Line.CreateBound(new XYZ(-2, 0, -1), new XYZ(-2, 0, 1))),
                     };
-                    var dim = fam.FamilyCreate.NewLinearDimension(view, line, refs);
+                    stage = dimStage + $": create in {view.Name} ({view.ViewType})";
+                    var dim = fam.FamilyCreate.NewLinearDimension(view, line, refs)
+                        ?? throw new RevitCommandException("command_failed", $"Revit couldn't dimension {string.Join(", ", names)} in {view.Name}.");
+                    stage = dimStage + ": label";
+                    if (P.StrOrNull(o, "parameter") is { } lp && famParams.TryGetValue(lp, out var lpar))
+                        stage += $" (param id {lpar.Id.Value}, instance {lpar.IsInstance}, def {(lpar.Definition is null ? "NULL" : lpar.Definition.Name)}, formula '{lpar.Formula}')";
                     if (P.BoolOr(o, "equal", false)) dim.AreSegmentsEqual = true;
                     else if (P.StrOrNull(o, "parameter") is { } lab)
                         dim.FamilyLabel = famParams.TryGetValue(lab, out var fp) ? fp
@@ -177,6 +224,8 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                 }
                 fam.Regenerate();
 
+                RefreshParams();
+                stage = "formulas";
                 // Formulas (after every parameter exists): e.g. "and(Top Rail On Flat, not(Solid Top))".
                 foreach (var node in p["parameters"] as JsonArray ?? new JsonArray())
                 {
@@ -190,7 +239,8 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                 }
                 fam.Regenerate();
 
-                int bi = 0;
+                RefreshParams();
+                stage = "boxes"; int bi = 0;
                 foreach (var node in P.Arr(p, "boxes"))
                 {
                     if (node is not JsonObject o) continue;
@@ -235,6 +285,7 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                 }
                 fam.Regenerate();
 
+                stage = "face locks";
                 // Lock every face to its plane: side faces in plan, top/bottom in the front elevation.
                 foreach (var (form, xs, ys, zs, label) in boxes)
                 {
@@ -257,7 +308,8 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                 t.Commit();
             }
 
-            var flex = new JsonArray();
+            RefreshParams();
+            stage = "types"; var flex = new JsonArray();
             bool allPassed = true;
             using (var t = new Transaction(fam, "Types"))
             {
@@ -285,6 +337,7 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                     flex.Add(new JsonObject { ["type"] = tName, ["passed"] = errs.Count == 0, ["errors"] = new JsonArray(errs.Select(e => (JsonNode)e).ToArray()) });
                 }
 
+                stage = "scenarios";
                 // Scenarios: instance-parameter combinations (tick boxes, sizes) flexed on the first type
                 // and then reset, so every combination a user can pick is proven, not just the types.
                 var firstType = typeNodes[0];
@@ -334,6 +387,7 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
 
             string? savedPath = null;
             long? familyId = null;
+            stage = "save/load";
             if (!ctx.DryRun && allPassed)
             {
                 var folder = P.StrOrNull(p, "folder") ?? Path.Combine(DefaultRoot, name);
@@ -365,12 +419,36 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
         {
             // Unexpected internal failure: report where, so it can be fixed rather than guessed at.
             var frame = ex.StackTrace?.Split('\n').FirstOrDefault(l => l.Contains("CreateModelFamilyCommand"))?.Trim();
-            throw new RevitCommandException("command_failed", $"{ex.GetType().Name}: {ex.Message} at {frame}");
+            throw new RevitCommandException("command_failed", $"{ex.GetType().Name} during '{stage}': {ex.Message}");
         }
         finally
         {
             fam.Close(false);
         }
+    }
+
+    private static void SetReferenceType(ReferencePlane rp, string type)
+    {
+        var t = type.Trim().ToLowerInvariant().Replace(" ", "").Replace("-", "").Replace("_", "");
+        FamilyInstanceReferenceType v = t switch
+        {
+            "left" => FamilyInstanceReferenceType.Left,
+            "right" => FamilyInstanceReferenceType.Right,
+            "front" => FamilyInstanceReferenceType.Front,
+            "back" => FamilyInstanceReferenceType.Back,
+            "top" => FamilyInstanceReferenceType.Top,
+            "bottom" => FamilyInstanceReferenceType.Bottom,
+            "centerleftright" or "centrelr" or "centerlr" => FamilyInstanceReferenceType.CenterLeftRight,
+            "centerfrontback" or "centrefb" or "centerfb" => FamilyInstanceReferenceType.CenterFrontBack,
+            "centerelevation" => FamilyInstanceReferenceType.CenterElevation,
+            "strong" => FamilyInstanceReferenceType.StrongReference,
+            "weak" => FamilyInstanceReferenceType.WeakReference,
+            "not" or "none" => FamilyInstanceReferenceType.NotAReference,
+            _ => throw new RevitCommandException("invalid_parameter", $"Unknown reference type '{type}'."),
+        };
+        var prm = rp.get_Parameter(BuiltInParameter.ELEM_REFERENCE_NAME)
+            ?? throw new RevitCommandException("command_failed", $"Plane '{rp.Name}' has no reference setting.");
+        prm.Set((int)v);
     }
 
     private static PlaneRef Get(Dictionary<string, PlaneRef> planes, string n) =>

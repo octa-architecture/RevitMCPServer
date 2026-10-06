@@ -55,7 +55,7 @@ public sealed class CreateDetailFamilyCommand : IRevitCommand
         try
         {
             var view = new FilteredElementCollector(fam).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
-                .FirstOrDefault(v => !v.IsTemplate)
+                .Where(v => !v.IsTemplate).OrderBy(v => v.ViewType == ViewType.FloorPlan ? 0 : 1).FirstOrDefault()
                 ?? throw new RevitCommandException("command_failed", "Family template has no plan view.");
             var mgr = fam.FamilyManager;
             var planes = new Dictionary<string, (ReferencePlane rp, bool vertical)>(StringComparer.OrdinalIgnoreCase);
@@ -115,7 +115,8 @@ public sealed class CreateDetailFamilyCommand : IRevitCommand
                     var dimLine = ps[0].vertical
                         ? Line.CreateBound(new XYZ(-1, -0.5, 0), new XYZ(1, -0.5, 0))
                         : Line.CreateBound(new XYZ(-0.5, -1, 0), new XYZ(-0.5, 1, 0));
-                    var dim = fam.FamilyCreate.NewLinearDimension(view, dimLine, refs);
+                    var dim = fam.FamilyCreate.NewLinearDimension(view, dimLine, refs)
+                        ?? throw new RevitCommandException("command_failed", $"Revit couldn't dimension {string.Join(", ", names)}.");
                     if (P.BoolOr(o, "equal", false)) dim.AreSegmentsEqual = true;
                     else if (P.StrOrNull(o, "parameter") is { } lab)
                         dim.FamilyLabel = famParams.TryGetValue(lab, out var fp) ? fp
