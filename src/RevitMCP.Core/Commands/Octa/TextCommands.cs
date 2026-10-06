@@ -30,6 +30,7 @@ internal static class TextUtil
             var leader = note.AddLeader(kind);
             leader.End = end;
             if (o["elbow"] is JsonObject) leader.Elbow = ViewPlane.Project(view, OctaUtil.PointParam(o, "elbow", scale));
+            else if (!arc && P.BoolOr(o, "orthogonal", true)) LeaderGeom.Orthogonalise(view, leader); // OCTA: 90° leaders
             added.Add(i);
         }
         return added;

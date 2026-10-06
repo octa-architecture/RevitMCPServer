@@ -19,6 +19,7 @@ const leader = z.object({
   elbow: pt.optional().describe("Optional elbow point."),
   side: z.enum(["left", "right"]).optional().describe("Which side of the text the leader leaves from. Default: side facing the end point."),
   arc: z.boolean().optional(),
+  orthogonal: z.boolean().optional().describe("Default true: horizontal shoulder then vertical drop (90°)."),
 });
 const graphics = {
   halftone: z.boolean().optional().describe("Fade (halftone). Prefer this to hiding elements."),
@@ -112,6 +113,23 @@ export function registerOctaRevitTools(
     { textNoteId: z.number().int(), leaders: z.array(leader).optional(), replace: z.boolean().optional(), units, dryRun },
     fwdWrite("set_text_leaders"));
 
+  tool("revit_tidy_text_leaders",
+    "Apply the OCTA leader rule in a view: leaders never cross and are 90° (horizontal from the text, vertical drop " +
+    "only if needed). Re-orders notes on each side to match their targets, moves notes level with targets where there " +
+    "is room, never moves arrow tips. Reports crossings before/after. Run after annotating any detail.",
+    { viewId: z.number().int().optional(), noteIds: z.array(z.number().int()).optional(),
+      gapMm: z.number().optional().describe("Paper gap between notes, default 2."),
+      moveNotes: z.boolean().optional().describe("false = only square up elbows."),
+      alignColumns: z.boolean().optional().describe("Default true: margin notes share a left text edge per column; notes inside the drawing stay put."),
+      dryRun },
+    fwdWrite("tidy_text_leaders"));
+
+  tool("revit_convert_line_leaders",
+    "Fix notes whose 'leaders' were drawn as detail lines (a line + two arrowhead strokes): replace each with a real " +
+    "text leader to the same tip and delete the drawn lines. Dry-run first to check the matches.",
+    { viewId: z.number().int().optional(), maxGapMm: z.number().optional(), arrowMaxMm: z.number().optional(), dryRun },
+    fwdWrite("convert_line_leaders"));
+
   // ── Graphics (instead of hiding) ─────────────────────────────────────────
   tool("revit_get_view_graphics",
     "Read a view's graphics: template, detail level, category overrides, and every element HIDDEN in the view. " +
@@ -135,9 +153,21 @@ export function registerOctaRevitTools(
     fwdWrite("set_element_graphics"));
 
   tool("revit_create_view_template_from_view",
-    "Save a view's current graphics as a new view template (and assign it by default).",
-    { viewId: z.number().int(), name: z.string(), assign: z.boolean().optional(), dryRun },
+    "Save a view's current graphics as a new view template (and assign it by default). By default the template does " +
+    "NOT control View Scale, so applying it never changes a detail's scale.",
+    { viewId: z.number().int(), name: z.string(), assign: z.boolean().optional(),
+      uncontrolled: z.array(z.string()).optional().describe("Properties the template must not control. Default ['View Scale']."),
+      dryRun },
     fwdWrite("create_view_template_from_view"));
+
+  tool("revit_set_template_controls",
+    "Choose which properties a view template controls: release (stop controlling, e.g. ['View Scale']) or control.",
+    { templateId: z.number().int().optional(), templateName: z.string().optional(),
+      release: z.array(z.string()).optional(), control: z.array(z.string()).optional(), dryRun },
+    fwdWrite("set_template_controls"));
+
+  tool("revit_set_view_scale", "Set a view's scale 1:N (fails if its template controls scale).",
+    { viewId: z.number().int().optional(), scale: z.number().int().min(1), dryRun }, fwdWrite("set_view_scale"));
 
   // ── OCTA review workflow ─────────────────────────────────────────────────
   tool("octa_flag_elements",

@@ -149,13 +149,126 @@ public sealed class CreateViewTemplateFromViewCommand : IRevitCommand
             throw new RevitCommandException("name_collision", $"A view template named '{name}' already exists.");
         var tpl = view.CreateViewTemplate();
         tpl.Name = name;
+        // Detail templates mustn't force a scale (or crop) onto every view they're applied to.
+        var uncontrol = p["uncontrolled"] is JsonArray u
+            ? u.Select((n, i) => P.StrFrom(n, $"uncontrolled[{i}]")).ToList()
+            : new List<string> { "View Scale" };
+        var released = TemplateControls.Release(tpl, uncontrol);
         if (P.BoolOr(p, "assign", true)) view.ViewTemplateId = tpl.Id;
         return new JsonObject
         {
             ["affected"] = Affected.Of(created: new[] { tpl.Id.Value }, modified: new[] { view.Id.Value }),
             ["templateId"] = tpl.Id.Value,
             ["name"] = tpl.Name,
+            ["uncontrolled"] = new JsonArray(released.Select(s => (JsonNode)JsonValue.Create(s)!).ToArray()),
         };
+    }
+}
+
+internal static class TemplateControls
+{
+    /// <summary>Stop a template controlling the named properties (e.g. "View Scale"). Returns names released.</summary>
+    public static List<string> Release(View tpl, IEnumerable<string> names)
+    {
+        var want = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
+        // "View Scale" has a paired "Scale Value 1:" parameter; release both together.
+        if (want.Contains("View Scale"))
+            foreach (Parameter prm in tpl.Parameters)
+                if (prm.Definition?.Name?.StartsWith("Scale Value", StringComparison.OrdinalIgnoreCase) == true)
+                    want.Add(prm.Definition.Name);
+        var nonControlled = tpl.GetNonControlledTemplateParameterIds().ToList();
+        var released = new List<string>();
+        foreach (var id in tpl.GetTemplateParameterIds())
+        {
+            var prmName = tpl.Parameters.Cast<Parameter>().FirstOrDefault(x => x.Id == id)?.Definition?.Name;
+            if (prmName is null || !want.Contains(prmName) || nonControlled.Contains(id)) continue;
+            nonControlled.Add(id);
+            released.Add(prmName);
+        }
+        tpl.SetNonControlledTemplateParameterIds(nonControlled);
+        return released;
+    }
+
+    public static List<string> Control(View tpl, IEnumerable<string> names)
+    {
+        var want = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
+        var nonControlled = tpl.GetNonControlledTemplateParameterIds().ToList();
+        var controlled = new List<string>();
+        foreach (var id in nonControlled.ToList())
+        {
+            var prmName = tpl.Parameters.Cast<Parameter>().FirstOrDefault(x => x.Id == id)?.Definition?.Name;
+            if (prmName is null || !want.Contains(prmName)) continue;
+            nonControlled.Remove(id);
+            controlled.Add(prmName);
+        }
+        tpl.SetNonControlledTemplateParameterIds(nonControlled);
+        return controlled;
+    }
+}
+
+/// <summary>
+/// Choose which properties a view template controls. Params: templateId or templateName,
+/// release? [names] (e.g. ["View Scale"]), control? [names]. Returns the template's controlled list.
+/// </summary>
+public sealed class SetTemplateControlsCommand : IRevitCommand
+{
+    public string Name => "set_template_controls";
+    public bool IsReadOnly => false;
+    public string RiskLevel => "medium";
+
+    public JsonNode? Execute(CommandContext ctx)
+    {
+        var doc = ctx.RequireDoc();
+        var p = ctx.Parameters;
+        View tpl;
+        if (p["templateId"] is not null)
+            tpl = doc.GetElement(new ElementId(P.Long(p, "templateId"))) as View
+                  ?? throw new RevitCommandException("not_found", "templateId is not a view.");
+        else
+        {
+            var n = P.Str(p, "templateName");
+            tpl = new FilteredElementCollector(doc).OfClass(typeof(View)).Cast<View>()
+                      .FirstOrDefault(v => v.IsTemplate && v.Name.Equals(n, StringComparison.OrdinalIgnoreCase))
+                  ?? throw new RevitCommandException("not_found", $"View template '{n}' not found.");
+        }
+        if (!tpl.IsTemplate) throw new RevitCommandException("invalid_parameter", $"'{tpl.Name}' is not a view template.");
+        List<string> Names(string key) => p[key] is JsonArray a ? a.Select((n, i) => P.StrFrom(n, $"{key}[{i}]")).ToList() : new List<string>();
+        var released = TemplateControls.Release(tpl, Names("release"));
+        var controlled = TemplateControls.Control(tpl, Names("control"));
+        var non = tpl.GetNonControlledTemplateParameterIds().ToHashSet();
+        var list = tpl.GetTemplateParameterIds().Where(id => !non.Contains(id))
+            .Select(id => tpl.Parameters.Cast<Parameter>().FirstOrDefault(x => x.Id == id)?.Definition?.Name)
+            .Where(s => s is not null).Select(s => (JsonNode)JsonValue.Create(s!)!).ToArray();
+        return new JsonObject
+        {
+            ["affected"] = Affected.Modified(tpl.Id.Value),
+            ["template"] = tpl.Name,
+            ["released"] = new JsonArray(released.Select(s => (JsonNode)JsonValue.Create(s)!).ToArray()),
+            ["controlled"] = new JsonArray(controlled.Select(s => (JsonNode)JsonValue.Create(s)!).ToArray()),
+            ["nowControls"] = new JsonArray(list),
+        };
+    }
+}
+
+/// <summary>Set a view's scale (1:N). Params: viewId, scale (N). Fails if a template controls scale.</summary>
+public sealed class SetViewScaleCommand : IRevitCommand
+{
+    public string Name => "set_view_scale";
+    public bool IsReadOnly => false;
+    public string RiskLevel => "medium";
+
+    public JsonNode? Execute(CommandContext ctx)
+    {
+        var doc = ctx.RequireDoc();
+        var view = OctaUtil.ResolveView(doc, ctx.Parameters);
+        var scale = P.Int(ctx.Parameters, "scale");
+        if (scale < 1) throw new RevitCommandException("invalid_parameter", "scale must be >= 1 (1:N).");
+        var prm = view.get_Parameter(BuiltInParameter.VIEW_SCALE_PULLDOWN_METRIC) ?? view.get_Parameter(BuiltInParameter.VIEW_SCALE);
+        if (prm is null || prm.IsReadOnly)
+            throw new RevitCommandException("template_controlled", $"'{view.Name}' scale is controlled by its view template.");
+        var old = view.Scale;
+        view.Scale = scale;
+        return new JsonObject { ["affected"] = Affected.Modified(view.Id.Value), ["viewId"] = view.Id.Value, ["from"] = old, ["to"] = view.Scale };
     }
 }
 

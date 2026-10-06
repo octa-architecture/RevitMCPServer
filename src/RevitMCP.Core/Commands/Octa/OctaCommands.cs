@@ -35,5 +35,9 @@ public static class OctaCommands
         r.Register(new SetSheetRevisionsCommand());
         r.Register(new CreateRevisionCloudCommand());
         r.Register(new CreateDetailFamilyCommand());
+        r.Register(new SetTemplateControlsCommand());
+        r.Register(new SetViewScaleCommand());
+        r.Register(new TidyTextLeadersCommand());
+        r.Register(new ConvertLineLeadersCommand());
     }
 }
