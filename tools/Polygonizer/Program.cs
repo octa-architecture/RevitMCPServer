@@ -28,6 +28,12 @@ else if (args[0] == "rhino")
     Console.WriteLine(RhinoToRevit.Run(args[1], args[2], double.Parse(args[3], inv), double.Parse(args[4], inv), double.Parse(args[5], inv),
         args[6], args[7], args.Length > 8 ? args[8] : "merge"));
 }
+else if (args[0] == "lace")
+{
+    // Polygonizer lace <in.csv> <outPrefix> <name> [--x 2.94] [--thickness 0.012] [--zmin ..] [--zmax ..] [--ymin ..] [--ymax ..] [--posts y1,y2] (see Lacework.cs)
+    Console.WriteLine(Lacework.Run(args));
+}
+else if (args[0] == "lacediag2") Lacework.Diag2(args);
 else if (args[0] == "walls")
 {
     // Polygonizer walls <segments.json> <out.json>
