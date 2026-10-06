@@ -250,6 +250,48 @@ public sealed class SetTemplateControlsCommand : IRevitCommand
     }
 }
 
+/// <summary>
+/// Crop a 3D view to its section box, so images and sheets frame just the boxed area (Revit
+/// otherwise frames the whole model). Params: viewId, paddingMm? (default 300).
+/// </summary>
+public sealed class FitCropToSectionBoxCommand : IRevitCommand
+{
+    public string Name => "fit_3d_crop_to_section_box";
+    public bool IsReadOnly => false;
+    public string RiskLevel => "low";
+
+    public JsonNode? Execute(CommandContext ctx)
+    {
+        var doc = ctx.RequireDoc();
+        var v = OctaUtil.ResolveView(doc, ctx.Parameters) as View3D
+            ?? throw new RevitCommandException("invalid_parameter", "Not a 3D view.");
+        if (!v.IsSectionBoxActive) throw new RevitCommandException("invalid_parameter", "The 3D view has no active section box.");
+        var pad = P.DblOr(ctx.Parameters, "paddingMm", 300) / 304.8;
+        var sb = v.GetSectionBox();
+        var crop = v.CropBox;
+        var inv = crop.Transform.Inverse;
+        double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+        foreach (var x in new[] { sb.Min.X, sb.Max.X })
+            foreach (var y in new[] { sb.Min.Y, sb.Max.Y })
+                foreach (var z in new[] { sb.Min.Z, sb.Max.Z })
+                {
+                    var q = inv.OfPoint(sb.Transform.OfPoint(new XYZ(x, y, z)));
+                    minX = Math.Min(minX, q.X); minY = Math.Min(minY, q.Y);
+                    maxX = Math.Max(maxX, q.X); maxY = Math.Max(maxY, q.Y);
+                }
+        var bb = new BoundingBoxXYZ
+        {
+            Transform = crop.Transform,
+            Min = new XYZ(minX - pad, minY - pad, crop.Min.Z),
+            Max = new XYZ(maxX + pad, maxY + pad, crop.Max.Z),
+        };
+        v.CropBox = bb;
+        v.CropBoxActive = true;
+        v.CropBoxVisible = false;
+        return new JsonObject { ["affected"] = Affected.Modified(v.Id.Value), ["viewId"] = v.Id.Value, ["cropped"] = true };
+    }
+}
+
 /// <summary>Set a view's scale (1:N). Params: viewId, scale (N). Fails if a template controls scale.</summary>
 public sealed class SetViewScaleCommand : IRevitCommand
 {

@@ -39,5 +39,7 @@ public static class OctaCommands
         r.Register(new SetViewScaleCommand());
         r.Register(new TidyTextLeadersCommand());
         r.Register(new ConvertLineLeadersCommand());
+        r.Register(new CreateModelFamilyCommand());
+        r.Register(new FitCropToSectionBoxCommand());
     }
 }

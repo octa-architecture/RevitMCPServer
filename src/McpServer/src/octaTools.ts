@@ -214,6 +214,33 @@ export function registerOctaRevitTools(
       dryRun,
     }, fwdWrite("create_detail_family"));
 
+  tool("revit_create_model_family",
+    "Build a PARAMETRIC 3D family (.rfa) from a spec: reference planes on x/y/z axes, labelled dimensions (or equal " +
+    "constraints), box solids/voids whose every face is locked to its planes, yes/no visibility, material parameters, " +
+    "category, and types. Every type is flexed and each box checked against its planes; nothing is saved unless all pass. " +
+    "Built-in planes: 'CX' (X=0), 'CY' (Y=0), 'LEVEL' (Z=0). Lengths in mm. Check the library first.",
+    {
+      name: z.string().describe("e.g. 'OCTA-Joinery-Base Cabinet'"),
+      category: z.string().optional().describe("e.g. 'Casework', 'Furniture', 'Specialty Equipment'. Default Generic Models."),
+      folder: z.string().optional(),
+      load: z.boolean().optional(),
+      parameters: z.array(z.object({ name: z.string(), kind: z.enum(["length", "yesno", "material"]).optional(),
+        instance: z.boolean().optional(), default: z.union([z.number(), z.boolean()]).optional() })).optional(),
+      planes: z.array(z.object({ name: z.string(), axis: z.enum(["x", "y", "z"]), offset: z.number() })),
+      dimensions: z.array(z.object({ planes: z.array(z.string()).min(2), parameter: z.string().optional(),
+        equal: z.boolean().optional() })).optional(),
+      boxes: z.array(z.object({ x: z.tuple([z.string(), z.string()]), y: z.tuple([z.string(), z.string()]),
+        z: z.tuple([z.string(), z.string()]), void: z.boolean().optional(), visibleIf: z.string().optional(),
+        material: z.string().optional() })).min(1),
+      types: z.array(z.object({ name: z.string(), values: z.record(z.union([z.number(), z.boolean()])).optional() })).optional(),
+      dryRun,
+    }, fwdWrite("create_model_family"));
+
+  tool("revit_fit_3d_crop_to_section_box",
+    "Crop a 3D view to its section box so revit_get_view_image (and sheets) frame just the boxed area.",
+    { viewId: z.number().int().optional(), paddingMm: z.number().optional(), dryRun },
+    fwdWrite("fit_3d_crop_to_section_box"));
+
   // ── Phasing ──────────────────────────────────────────────────────────────
   tool("revit_list_phase_filters", "List phase filters and how each shows New / Existing / Demolished / Temporary.",
     {}, fwd("list_phase_filters"));

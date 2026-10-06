@@ -178,6 +178,10 @@ public sealed class CreateDetailFamilyCommand : IRevitCommand
                     if (first && mgr.CurrentType is not null) mgr.RenameCurrentType(tName);
                     else mgr.CurrentType = mgr.NewType(tName);
                     first = false;
+                    // New types copy the previous one; start each from the declared defaults.
+                    foreach (var dn in (p["parameters"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+                        if (dn["default"] is not null && famParams.TryGetValue(P.Str(dn, "name"), out var dfp))
+                            SetFamParam(mgr, dfp, dn["default"]);
                     if (tn["values"] is JsonObject vals)
                         foreach (var kv in vals)
                             SetFamParam(mgr, famParams.TryGetValue(kv.Key, out var fp) ? fp

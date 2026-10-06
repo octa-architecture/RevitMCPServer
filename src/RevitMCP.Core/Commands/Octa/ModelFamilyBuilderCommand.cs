@@ -1,0 +1,328 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.Json.Nodes;
+using Autodesk.Revit.DB;
+
+namespace RevitMCPAddin.Commands.Octa;
+
+/// <summary>
+/// Build a parametric 3D family (Generic Model template, any model category) from a spec, flex every
+/// type to prove the geometry follows the parameters, save it, and optionally load it.
+///
+/// Spec (lengths in mm):
+///   name, category? (e.g. "Casework", "Furniture", "Specialty Equipment"; default Generic Models),
+///   folder?, load? (default true)
+///   parameters  [{ name, kind: "length"|"yesno"|"material", instance? (default false = type), default? }]
+///   planes      [{ name, axis: "x"|"y"|"z", offset }]  x = constant X (left/right), y = constant Y
+///               (front/back), z = constant height. Built-ins: "CX" (X=0), "CY" (Y=0), "LEVEL" (Z=0).
+///   dimensions  [{ planes: [a, b], parameter }] or [{ planes: [a, mid, b], equal: true }] — all same axis
+///   boxes       [{ x: [planeA, planeB], y: [..], z: [bottom, top], void?: bool, visibleIf?: yesno,
+///                  material?: materialParam }]  — every face is locked to its plane
+///   types       [{ name, values: { param: value } }]
+/// dryRun: builds and flexes but doesn't save or load.
+/// </summary>
+public sealed class CreateModelFamilyCommand : IRevitCommand
+{
+    public string Name => "create_model_family";
+    public bool IsReadOnly => false;
+    public string RiskLevel => "low";
+
+    private const string Template = @"C:\ProgramData\Autodesk\RVT 2027\Family Templates\English\Metric Generic Model.rft";
+    private const string DefaultRoot = @"H:\Shared drives\OCTA\3 Standards & Library\1 Revit\4 Family Development";
+    private const double Mm = 1.0 / 304.8;
+    private const double Tol = 0.01 * Mm;
+
+    private sealed class PlaneRef
+    {
+        public required char Axis;          // 'x', 'y' or 'z'
+        public ReferencePlane? Rp;
+        public Level? Level;
+        public Reference GetReference() => Rp?.GetReference() ?? Level!.GetPlaneReference();
+        public double Position => Axis switch
+        {
+            'x' => Rp!.GetPlane().Origin.X,
+            'y' => Rp!.GetPlane().Origin.Y,
+            _ => Rp is not null ? Rp.GetPlane().Origin.Z : Level!.Elevation,
+        };
+    }
+
+    public JsonNode? Execute(CommandContext ctx)
+    {
+        var doc = ctx.RequireDoc();
+        var p = ctx.Parameters;
+        var name = P.Str(p, "name");
+        if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            throw new RevitCommandException("invalid_parameter", $"'{name}' isn't a valid file name.");
+        if (!File.Exists(Template)) throw new RevitCommandException("not_found", $"Template missing: {Template}");
+
+        var fam = ctx.App.Application.NewFamilyDocument(Template)
+            ?? throw new RevitCommandException("command_failed", "Revit couldn't create a family document.");
+        var warnings = new JsonArray();
+        try
+        {
+            var plan = new FilteredElementCollector(fam).OfClass(typeof(ViewPlan)).Cast<ViewPlan>().First(v => !v.IsTemplate);
+            var front = new FilteredElementCollector(fam).OfClass(typeof(View)).Cast<View>()
+                .FirstOrDefault(v => !v.IsTemplate && v.ViewType == ViewType.Elevation && v.Name.Contains("Front"))
+                ?? throw new RevitCommandException("command_failed", "Template has no Front elevation.");
+            var mgr = fam.FamilyManager;
+            var planes = new Dictionary<string, PlaneRef>(StringComparer.OrdinalIgnoreCase);
+            var famParams = new Dictionary<string, FamilyParameter>(StringComparer.OrdinalIgnoreCase);
+            var boxes = new List<(GenericForm form, PlaneRef[] x, PlaneRef[] y, PlaneRef[] z, string label)>();
+
+            using (var t = new Transaction(fam, "Build family"))
+            {
+                t.Start();
+                if (mgr.CurrentType is null) mgr.NewType(name);
+
+                if (P.StrOrNull(p, "category") is { } catName)
+                {
+                    Category? cat = null;
+                    foreach (Category c in fam.Settings.Categories)
+                        if (c.Name.Equals(catName, StringComparison.OrdinalIgnoreCase)) { cat = c; break; }
+                    if (cat is null) throw new RevitCommandException("not_found", $"Category '{catName}' not found.");
+                    fam.OwnerFamily.FamilyCategory = cat;
+                }
+
+                foreach (var rp in new FilteredElementCollector(fam).OfClass(typeof(ReferencePlane)).Cast<ReferencePlane>())
+                {
+                    if (rp.Name == "Center (Left/Right)") planes["CX"] = new PlaneRef { Axis = 'x', Rp = rp };
+                    else if (rp.Name == "Center (Front/Back)") planes["CY"] = new PlaneRef { Axis = 'y', Rp = rp };
+                }
+                var level = new FilteredElementCollector(fam).OfClass(typeof(Level)).Cast<Level>().First();
+                planes["LEVEL"] = new PlaneRef { Axis = 'z', Level = level };
+
+                foreach (var node in p["parameters"] as JsonArray ?? new JsonArray())
+                {
+                    if (node is not JsonObject o) continue;
+                    var pn = P.Str(o, "name");
+                    var kind = (P.StrOrNull(o, "kind") ?? "length").ToLowerInvariant();
+                    var (spec, group) = kind switch
+                    {
+                        "yesno" => (SpecTypeId.Boolean.YesNo, GroupTypeId.Graphics),
+                        "material" => (SpecTypeId.Reference.Material, GroupTypeId.Materials),
+                        _ => (SpecTypeId.Length, GroupTypeId.Geometry),
+                    };
+                    // Categories like Casework already have Width/Depth/Height: reuse them (schedules/tags use them).
+                    var fp = mgr.get_Parameter(pn) ?? mgr.AddParameter(pn, group, spec, P.BoolOr(o, "instance", false));
+                    famParams[pn] = fp;
+                    if (o["default"] is not null && kind != "material") SetFamParam(mgr, fp, o["default"]);
+                }
+
+                foreach (var node in P.Arr(p, "planes"))
+                {
+                    if (node is not JsonObject o) continue;
+                    var pn = P.Str(o, "name");
+                    var axis = char.ToLowerInvariant(P.Str(o, "axis")[0]);
+                    var off = P.Dbl(o, "offset") * Mm;
+                    ReferencePlane rp = axis switch
+                    {
+                        'x' => fam.FamilyCreate.NewReferencePlane(new XYZ(off, -1, 0), new XYZ(off, 1, 0), XYZ.BasisZ, plan),
+                        'y' => fam.FamilyCreate.NewReferencePlane(new XYZ(-1, off, 0), new XYZ(1, off, 0), XYZ.BasisZ, plan),
+                        'z' => fam.FamilyCreate.NewReferencePlane(new XYZ(-1, 0, off), new XYZ(1, 0, off), XYZ.BasisY, front),
+                        _ => throw new RevitCommandException("invalid_parameter", $"Plane '{pn}' axis must be x, y or z."),
+                    };
+                    rp.Name = pn;
+                    planes[pn] = new PlaneRef { Axis = axis, Rp = rp };
+                }
+                fam.Regenerate();
+
+                foreach (var node in p["dimensions"] as JsonArray ?? new JsonArray())
+                {
+                    if (node is not JsonObject o) continue;
+                    var names = P.Arr(o, "planes").Select((n, i) => P.StrFrom(n, $"planes[{i}]")).ToList();
+                    var ps = names.Select(n => Get(planes, n)).ToList();
+                    var axis = ps[0].Axis;
+                    if (ps.Any(x => x.Axis != axis))
+                        throw new RevitCommandException("invalid_parameter", $"Dimension planes {string.Join(", ", names)} must share an axis.");
+                    var refs = new ReferenceArray();
+                    foreach (var x in ps) refs.Append(x.GetReference());
+                    var (view, line) = axis switch
+                    {
+                        'x' => ((View)plan, Line.CreateBound(new XYZ(-1, -2, 0), new XYZ(1, -2, 0))),
+                        'y' => (plan, Line.CreateBound(new XYZ(-2, -1, 0), new XYZ(-2, 1, 0))),
+                        _ => (front, Line.CreateBound(new XYZ(-2, 0, -1), new XYZ(-2, 0, 1))),
+                    };
+                    var dim = fam.FamilyCreate.NewLinearDimension(view, line, refs);
+                    if (P.BoolOr(o, "equal", false)) dim.AreSegmentsEqual = true;
+                    else if (P.StrOrNull(o, "parameter") is { } lab)
+                        dim.FamilyLabel = famParams.TryGetValue(lab, out var fp) ? fp
+                            : throw new RevitCommandException("not_found", $"Dimension label '{lab}' isn't in parameters.");
+                }
+                fam.Regenerate();
+
+                int bi = 0;
+                foreach (var node in P.Arr(p, "boxes"))
+                {
+                    if (node is not JsonObject o) continue;
+                    bi++;
+                    var xs = Pair(planes, o, "x", 'x');
+                    var ys = Pair(planes, o, "y", 'y');
+                    var zs = Pair(planes, o, "z", 'z');
+                    double x0 = Math.Min(xs[0].Position, xs[1].Position), x1 = Math.Max(xs[0].Position, xs[1].Position);
+                    double y0 = Math.Min(ys[0].Position, ys[1].Position), y1 = Math.Max(ys[0].Position, ys[1].Position);
+                    double z0 = Math.Min(zs[0].Position, zs[1].Position), z1 = Math.Max(zs[0].Position, zs[1].Position);
+                    if (x1 - x0 < Tol || y1 - y0 < Tol || z1 - z0 < Tol)
+                        throw new RevitCommandException("invalid_parameter", $"Box {bi} has zero size at the default values.");
+
+                    var loop = new CurveArray();
+                    var c = new[] { new XYZ(x0, y0, z0), new XYZ(x1, y0, z0), new XYZ(x1, y1, z0), new XYZ(x0, y1, z0) };
+                    for (int i = 0; i < 4; i++) loop.Append(Line.CreateBound(c[i], c[(i + 1) % 4]));
+                    var profile = new CurveArrArray();
+                    profile.Append(loop);
+                    var sketch = SketchPlane.Create(fam, Plane.CreateByNormalAndOrigin(XYZ.BasisZ, new XYZ(0, 0, z0)));
+                    bool isVoid = P.BoolOr(o, "void", false);
+                    var ext = fam.FamilyCreate.NewExtrusion(!isVoid, profile, sketch, z1 - z0);
+
+                    if (P.StrOrNull(o, "visibleIf") is { } vis)
+                        mgr.AssociateElementParameterToFamilyParameter(ext.get_Parameter(BuiltInParameter.IS_VISIBLE_PARAM),
+                            famParams.TryGetValue(vis, out var vp) ? vp : throw new RevitCommandException("not_found", $"visibleIf '{vis}' isn't a parameter."));
+                    if (P.StrOrNull(o, "material") is { } mat && !isVoid)
+                        mgr.AssociateElementParameterToFamilyParameter(ext.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM),
+                            famParams.TryGetValue(mat, out var mp) ? mp : throw new RevitCommandException("not_found", $"material '{mat}' isn't a parameter."));
+                    boxes.Add((ext, xs, ys, zs, $"box {bi}"));
+                }
+                fam.Regenerate();
+
+                // Lock every face to its plane: side faces in plan, top/bottom in the front elevation.
+                foreach (var (form, xs, ys, zs, label) in boxes)
+                {
+                    foreach (var face in Faces(form))
+                    {
+                        var n = face.FaceNormal;
+                        var o = face.Origin;
+                        PlaneRef? target = null;
+                        View? view = null;
+                        if (Math.Abs(n.X) > 0.99) { target = xs.FirstOrDefault(x => Math.Abs(x.Position - o.X) < Tol); view = plan; }
+                        else if (Math.Abs(n.Y) > 0.99) { target = ys.FirstOrDefault(y => Math.Abs(y.Position - o.Y) < Tol); view = front; }
+                        else if (Math.Abs(n.Z) > 0.99) { target = zs.FirstOrDefault(z => Math.Abs(z.Position - o.Z) < Tol); view = front; }
+                        if (target is null || view is null) continue;
+                        // Y faces show as lines in plan, not in the front view.
+                        if (Math.Abs(n.Y) > 0.99) view = plan;
+                        try { fam.FamilyCreate.NewAlignment(view, target.GetReference(), face.Reference); }
+                        catch (Exception ex) { warnings.Add($"{label}: couldn't lock face ({n.X:0},{n.Y:0},{n.Z:0}): {ex.Message}"); }
+                    }
+                }
+                t.Commit();
+            }
+
+            var flex = new JsonArray();
+            bool allPassed = true;
+            using (var t = new Transaction(fam, "Types"))
+            {
+                t.Start();
+                var typeNodes = (p["types"] as JsonArray ?? new JsonArray()).OfType<JsonObject>().ToList();
+                if (typeNodes.Count == 0) typeNodes.Add(new JsonObject { ["name"] = name });
+                bool first = true;
+                foreach (var tn in typeNodes)
+                {
+                    var tName = P.Str(tn, "name");
+                    if (first) mgr.RenameCurrentType(tName); else mgr.CurrentType = mgr.NewType(tName);
+                    first = false;
+                    // A new type copies the previous one; start every type from the declared defaults
+                    // so a value left out means "default", not "whatever the last type had".
+                    foreach (var dn in (p["parameters"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+                        if (dn["default"] is not null && famParams.TryGetValue(P.Str(dn, "name"), out var dfp))
+                            SetFamParam(mgr, dfp, dn["default"]);
+                    if (tn["values"] is JsonObject vals)
+                        foreach (var kv in vals)
+                            SetFamParam(mgr, famParams.TryGetValue(kv.Key, out var fp) ? fp
+                                : throw new RevitCommandException("not_found", $"Type value '{kv.Key}' isn't a parameter."), kv.Value);
+                    fam.Regenerate();
+                    var errs = new List<string>();
+                    foreach (var (form, xs, ys, zs, label) in boxes)
+                    {
+                        var bb = form.get_BoundingBox(null);
+                        if (bb is null) continue; // hidden by a yes/no parameter in this type
+                        void Expect(string what, double got, double want)
+                        {
+                            if (Math.Abs(got - want) > Tol) errs.Add($"{label} {what}: off by {Math.Round((got - want) / Mm, 2)} mm");
+                        }
+                        Expect("left", bb.Min.X, Math.Min(xs[0].Position, xs[1].Position));
+                        Expect("right", bb.Max.X, Math.Max(xs[0].Position, xs[1].Position));
+                        Expect("front", bb.Min.Y, Math.Min(ys[0].Position, ys[1].Position));
+                        Expect("back", bb.Max.Y, Math.Max(ys[0].Position, ys[1].Position));
+                        Expect("bottom", bb.Min.Z, Math.Min(zs[0].Position, zs[1].Position));
+                        Expect("top", bb.Max.Z, Math.Max(zs[0].Position, zs[1].Position));
+                    }
+                    allPassed &= errs.Count == 0;
+                    flex.Add(new JsonObject { ["type"] = tName, ["passed"] = errs.Count == 0, ["errors"] = new JsonArray(errs.Select(e => (JsonNode)e).ToArray()) });
+                }
+                t.Commit();
+            }
+
+            string? savedPath = null;
+            long? familyId = null;
+            if (!ctx.DryRun && allPassed)
+            {
+                var folder = P.StrOrNull(p, "folder") ?? Path.Combine(DefaultRoot, name);
+                Directory.CreateDirectory(folder);
+                savedPath = Path.Combine(folder, name + ".rfa");
+                fam.SaveAs(savedPath, new SaveAsOptions { OverwriteExistingFile = true });
+                if (P.BoolOr(p, "load", true) && !doc.IsFamilyDocument)
+                {
+                    doc.LoadFamily(savedPath, new OverwriteFamilyLoad(), out var family);
+                    familyId = family?.Id.Value;
+                }
+            }
+
+            return new JsonObject
+            {
+                ["affected"] = familyId is { } fid ? Affected.Created(fid) : Affected.Of(),
+                ["name"] = name,
+                ["category"] = fam.OwnerFamily.FamilyCategory?.Name,
+                ["flexPassed"] = allPassed,
+                ["flex"] = flex,
+                ["savedPath"] = savedPath,
+                ["loadedFamilyId"] = familyId,
+                ["warnings"] = warnings,
+                ["note"] = allPassed ? (ctx.DryRun ? "Dry run: not saved." : null)
+                    : "Flex test failed: nothing saved. Usually a face that isn't dimensioned to a parameter or locked.",
+            };
+        }
+        finally
+        {
+            fam.Close(false);
+        }
+    }
+
+    private static PlaneRef Get(Dictionary<string, PlaneRef> planes, string n) =>
+        planes.TryGetValue(n, out var x) ? x
+            : throw new RevitCommandException("not_found", $"Plane '{n}' isn't defined. Planes: {string.Join(", ", planes.Keys)}");
+
+    private static PlaneRef[] Pair(Dictionary<string, PlaneRef> planes, JsonObject o, string key, char axis)
+    {
+        var a = P.Arr(o, key);
+        if (a.Count != 2) throw new RevitCommandException("invalid_parameter", $"Box '{key}' must be two plane names.");
+        var r = new[] { Get(planes, P.StrFrom(a[0], key)), Get(planes, P.StrFrom(a[1], key)) };
+        if (r.Any(x => x.Axis != axis))
+            throw new RevitCommandException("invalid_parameter", $"Box '{key}' planes must be {axis}-axis planes.");
+        return r;
+    }
+
+    private static IEnumerable<PlanarFace> Faces(GenericForm form)
+    {
+        var opts = new Options { ComputeReferences = true, IncludeNonVisibleObjects = true };
+        foreach (var g in form.get_Geometry(opts))
+            if (g is Solid s)
+                foreach (Face f in s.Faces)
+                    if (f is PlanarFace pf && pf.Reference is not null) yield return pf;
+    }
+
+    private static void SetFamParam(FamilyManager mgr, FamilyParameter fp, JsonNode? value)
+    {
+        var dt = fp.Definition.GetDataType();
+        if (dt == SpecTypeId.Boolean.YesNo)
+            mgr.Set(fp, value is JsonValue v && v.TryGetValue<bool>(out var b) ? (b ? 1 : 0) : P.IntFrom(value, fp.Definition.Name));
+        else if (dt == SpecTypeId.Length)
+            mgr.Set(fp, P.DblFrom(value, fp.Definition.Name) * Mm);
+    }
+
+    private sealed class OverwriteFamilyLoad : IFamilyLoadOptions
+    {
+        public bool OnFamilyFound(bool familyInUse, out bool overwriteParameterValues) { overwriteParameterValues = true; return true; }
+        public bool OnSharedFamilyFound(Family sharedFamily, bool familyInUse, out FamilySource source, out bool overwriteParameterValues)
+        { source = FamilySource.Family; overwriteParameterValues = true; return true; }
+    }
+}
