@@ -18,7 +18,8 @@ param(
     [double]$MaxHours = 12,
     [switch]$CloseRevit,
     [switch]$Save,
-    [switch]$Reopen
+    [switch]$Reopen,
+    [string]$OpenModel
 )
 $ErrorActionPreference = "Stop"
 $ver = "2027"
@@ -35,6 +36,7 @@ function Call-Addin([string]$command, [hashtable]$params) {
 }
 
 $reopenPaths = @()
+if ($OpenModel) { $reopenPaths = @($OpenModel) }
 if ($CloseRevit -and (Get-Process -Name Revit -ErrorAction SilentlyContinue)) {
     try {
         $docs = Call-Addin "list_open_documents" @{}

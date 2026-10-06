@@ -162,6 +162,54 @@ export function registerOctaRevitTools(
   tool("octa_list_internal_notes", "List all internal notes (text, view, hidden state). Run before issuing drawings.",
     { viewId: z.number().int().optional() }, fwd("octa_list_internal_notes"));
 
+  // ── Phasing ──────────────────────────────────────────────────────────────
+  tool("revit_list_phase_filters", "List phase filters and how each shows New / Existing / Demolished / Temporary.",
+    {}, fwd("list_phase_filters"));
+
+  const presentation = z.enum(["by_category", "overridden", "not_displayed"]).optional();
+  tool("revit_create_phase_filter",
+    "Create or update a phase filter. OCTA set: 'Show Existing', 'Show Demo + New', 'Show Previous + New', 'Show New'.",
+    { name: z.string(), new: presentation, existing: presentation, demolished: presentation, temporary: presentation,
+      updateIfExists: z.boolean().optional(), dryRun }, fwdWrite("create_phase_filter"));
+
+  tool("revit_set_element_phase",
+    "Set Phase Created and/or Phase Demolished (name or id) on elements. To demolish an existing element set " +
+    "phaseDemolished to 'New Construction'; 'none' clears it. Per-element failures are reported, not fatal.",
+    { elementIds: ids, phaseCreated: z.string().optional(), phaseDemolished: z.string().optional(), dryRun },
+    fwdWrite("set_element_phase"));
+
+  tool("revit_set_view_phase", "Set the Phase and/or Phase Filter of views (fails per view if a template controls it).",
+    { viewIds: ids, phase: z.string().optional(), phaseFilter: z.string().optional(), dryRun }, fwdWrite("set_view_phase"));
+
+  tool("revit_rename_phase", "Rename a phase. Ask the user first — views, schedules and elements all reference phases.",
+    { phase: z.string(), newName: z.string(), dryRun }, fwdWrite("rename_phase"));
+
+  // ── Revisions ────────────────────────────────────────────────────────────
+  tool("revit_list_revisions", "List revisions (number, date, description, issued, numbering) and the sheets each is on.",
+    {}, fwd("list_revisions"));
+
+  tool("revit_create_revision",
+    "Create a revision numbered in the OCTA stage sequence (stageCode DD → DD-01, DD-02…; sequence created if missing). " +
+    "Practice OS owns the register: confirm with the user before creating revisions.",
+    { stageCode: z.enum(["SD", "TP", "DD", "BP", "TD", "FC"]), description: z.string(),
+      date: z.string().describe("As shown on sheets, e.g. 2026-10-06."),
+      issuedBy: z.string().optional(), issuedTo: z.string().optional(), issued: z.boolean().optional(), dryRun },
+    fwdWrite("create_revision"));
+
+  tool("revit_update_revision", "Update a revision's description/date/issued by/to, or set issued (locks it).",
+    { revisionId: z.number().int().optional(), revisionNumber: z.string().optional(), description: z.string().optional(),
+      date: z.string().optional(), issuedBy: z.string().optional(), issuedTo: z.string().optional(),
+      issued: z.boolean().optional(), dryRun }, fwdWrite("update_revision"));
+
+  tool("revit_set_sheet_revisions", "Add (or remove=true) a revision on sheets by sheet number, e.g. ['AR-20-01'].",
+    { revisionId: z.number().int().optional(), revisionNumber: z.string().optional(),
+      sheetNumbers: z.array(z.string()).optional(), sheetIds: z.array(z.number().int()).optional(),
+      remove: z.boolean().optional(), dryRun }, fwdWrite("set_sheet_revisions"));
+
+  tool("revit_create_revision_cloud", "Draw a revision cloud around a changed area in a view or sheet.",
+    { revisionId: z.number().int().optional(), revisionNumber: z.string().optional(), viewId: z.number().int().optional(),
+      boundary: z.array(pt).min(3), units, dryRun }, fwdWrite("create_revision_cloud"));
+
   tool("octa_set_internal_notes_visibility",
     "Hide (visible=false) internal notes before printing/issuing, show them again after. Optional viewIds to limit.",
     { visible: z.boolean(), viewIds: z.array(z.number().int()).optional(), dryRun },

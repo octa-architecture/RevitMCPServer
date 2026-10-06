@@ -24,5 +24,15 @@ public static class OctaCommands
         r.Register(new ListOpenDocumentsCommand());
         r.Register(new OpenDocumentCommand());
         r.Register(new ExitRevitCommand());
+        r.Register(new ListPhaseFiltersCommand());
+        r.Register(new CreatePhaseFilterCommand());
+        r.Register(new SetElementPhaseCommand());
+        r.Register(new SetViewPhaseCommand());
+        r.Register(new RenamePhaseCommand());
+        r.Register(new ListRevisionsCommand());
+        r.Register(new CreateRevisionCommand());
+        r.Register(new UpdateRevisionCommand());
+        r.Register(new SetSheetRevisionsCommand());
+        r.Register(new CreateRevisionCloudCommand());
     }
 }
