@@ -328,6 +328,25 @@ export function registerOctaRevitTools(
     "Import meshes (e.g. Rhino render meshes or scan meshes, already in internal metres) from a JSON file on this PC as DirectShapes: [{name, category?, vertices, faces, comments?}].",
     { path: z.string(), phase: z.string().optional(), category: z.string().optional(), dryRun }, fwdWrite("import_mesh_directshape"));
 
+  tool("revit_create_profile_family",
+    "Make a profile family (for wall sweeps, gutters, fascias) from a closed polyline [[x,y]] in mm (x = out from the wall/edge, y = up; origin = attach point). Saved to Family Development and loaded.",
+    { name: z.string(), points: z.array(z.array(z.number()).length(2)).min(3), folder: z.string().optional(), load: z.boolean().optional() },
+    fwd("create_profile_family"));
+  tool("revit_create_wall_sweep",
+    "Wall sweep (cornice, string course, skirting) on a wall using a profile family; makes/reuses sweep type typeName. Height by absolute heightRL or offsetMm from the wall base.",
+    { wallId: z.number().int(), profileFamily: z.string(), typeName: z.string(), heightRL: z.number().optional(), offsetMm: z.number().optional(),
+      side: z.enum(["exterior", "interior"]).optional(), flip: z.boolean().optional(), wallOffsetMm: z.number().optional(), materialName: z.string().optional(), dryRun },
+    fwdWrite("create_wall_sweep"));
+  tool("revit_create_footprint_roof",
+    "Footprint roof from a polygon [[x,y]] (m, internal) at baseRL, slopes in degrees per edge (0 = no slope), optional single-layer thickness type.",
+    { points: z.array(z.array(z.number()).length(2)).min(3), levelName: z.string(), baseRL: z.number(), slopes: z.array(z.number()).optional(),
+      thicknessMm: z.number().optional(), typePrefix: z.string().optional(), phase: z.string().optional(), comments: z.string().optional(), dryRun },
+    fwdWrite("create_footprint_roof"));
+  tool("revit_create_roof_edge",
+    "Gutter or fascia on a roof's lowest edge nearest edgeNear [x,y] (m), using a profile family.",
+    { roofId: z.number().int(), profileFamily: z.string(), typeName: z.string(), edgeNear: z.array(z.number()).length(2), kind: z.enum(["gutter", "fascia"]).optional(), dryRun },
+    fwdWrite("create_roof_edge"));
+
   // ── Template / standards ─────────────────────────────────────────────────
   const namesOrAll = z.union([z.array(z.string()), z.literal("all")]).optional();
   tool("revit_copy_from_document",

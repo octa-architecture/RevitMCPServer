@@ -1,0 +1,333 @@
+﻿{
+    "name":  "OCTA-Chimney-Corbelled (Heritage)",
+    "template":  "generic",
+    "category":  "Generic Models",
+    "folder":  "H:\\Shared drives\\OCTA\\3 Standards \u0026 Library\\1 Revit\\4 Family Development\\OCTA-Chimney-Corbelled (Heritage)",
+    "parameters":  [
+                       {
+                           "default":  853,
+                           "name":  "Width"
+                       },
+                       {
+                           "default":  627,
+                           "name":  "Depth"
+                       },
+                       {
+                           "instance":  true,
+                           "default":  1040,
+                           "name":  "Stack Height"
+                       },
+                       {
+                           "default":  70,
+                           "name":  "Corbel 1 Height"
+                       },
+                       {
+                           "default":  50,
+                           "name":  "Corbel 1 Projection"
+                       },
+                       {
+                           "default":  140,
+                           "name":  "Corbel 2 Height"
+                       },
+                       {
+                           "default":  100,
+                           "name":  "Corbel 2 Projection"
+                       },
+                       {
+                           "default":  170,
+                           "name":  "Cap Height"
+                       },
+                       {
+                           "kind":  "material",
+                           "name":  "Brick Material"
+                       },
+                       {
+                           "kind":  "material",
+                           "name":  "Render Material"
+                       }
+                   ],
+    "planes":  [
+                   {
+                       "offset":  -426.5,
+                       "name":  "XL",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  426.5,
+                       "name":  "XR",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  -313.5,
+                       "name":  "YF",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  313.5,
+                       "name":  "YB",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  -476.5,
+                       "name":  "C1L",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  476.5,
+                       "name":  "C1R",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  -363.5,
+                       "name":  "C1F",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  363.5,
+                       "name":  "C1B",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  -526.5,
+                       "name":  "C2L",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  526.5,
+                       "name":  "C2R",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  -413.5,
+                       "name":  "C2F",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  413.5,
+                       "name":  "C2B",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  1040,
+                       "name":  "CB",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  1110,
+                       "name":  "C1T",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  1250,
+                       "name":  "C2T",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  1420,
+                       "reference":  "Top",
+                       "name":  "TOP",
+                       "axis":  "z"
+                   }
+               ],
+    "dimensions":  [
+                       {
+                           "planes":  [
+                                          "XL",
+                                          "CX",
+                                          "XR"
+                                      ],
+                           "equal":  true
+                       },
+                       {
+                           "planes":  [
+                                          "XL",
+                                          "XR"
+                                      ],
+                           "parameter":  "Width"
+                       },
+                       {
+                           "planes":  [
+                                          "YF",
+                                          "CY",
+                                          "YB"
+                                      ],
+                           "equal":  true
+                       },
+                       {
+                           "planes":  [
+                                          "YF",
+                                          "YB"
+                                      ],
+                           "parameter":  "Depth"
+                       },
+                       {
+                           "planes":  [
+                                          "C1L",
+                                          "XL"
+                                      ],
+                           "parameter":  "Corbel 1 Projection"
+                       },
+                       {
+                           "planes":  [
+                                          "XR",
+                                          "C1R"
+                                      ],
+                           "parameter":  "Corbel 1 Projection"
+                       },
+                       {
+                           "planes":  [
+                                          "C1F",
+                                          "YF"
+                                      ],
+                           "parameter":  "Corbel 1 Projection"
+                       },
+                       {
+                           "planes":  [
+                                          "YB",
+                                          "C1B"
+                                      ],
+                           "parameter":  "Corbel 1 Projection"
+                       },
+                       {
+                           "planes":  [
+                                          "C2L",
+                                          "XL"
+                                      ],
+                           "parameter":  "Corbel 2 Projection"
+                       },
+                       {
+                           "planes":  [
+                                          "XR",
+                                          "C2R"
+                                      ],
+                           "parameter":  "Corbel 2 Projection"
+                       },
+                       {
+                           "planes":  [
+                                          "C2F",
+                                          "YF"
+                                      ],
+                           "parameter":  "Corbel 2 Projection"
+                       },
+                       {
+                           "planes":  [
+                                          "YB",
+                                          "C2B"
+                                      ],
+                           "parameter":  "Corbel 2 Projection"
+                       },
+                       {
+                           "planes":  [
+                                          "LEVEL",
+                                          "CB"
+                                      ],
+                           "parameter":  "Stack Height"
+                       },
+                       {
+                           "planes":  [
+                                          "CB",
+                                          "C1T"
+                                      ],
+                           "parameter":  "Corbel 1 Height"
+                       },
+                       {
+                           "planes":  [
+                                          "C1T",
+                                          "C2T"
+                                      ],
+                           "parameter":  "Corbel 2 Height"
+                       },
+                       {
+                           "planes":  [
+                                          "C2T",
+                                          "TOP"
+                                      ],
+                           "parameter":  "Cap Height"
+                       }
+                   ],
+    "boxes":  [
+                  {
+                      "y":  [
+                                "YF",
+                                "YB"
+                            ],
+                      "material":  "Brick Material",
+                      "z":  [
+                                "LEVEL",
+                                "CB"
+                            ],
+                      "x":  [
+                                "XL",
+                                "XR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "C1F",
+                                "C1B"
+                            ],
+                      "material":  "Render Material",
+                      "z":  [
+                                "CB",
+                                "C1T"
+                            ],
+                      "x":  [
+                                "C1L",
+                                "C1R"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "C2F",
+                                "C2B"
+                            ],
+                      "material":  "Render Material",
+                      "z":  [
+                                "C1T",
+                                "C2T"
+                            ],
+                      "x":  [
+                                "C2L",
+                                "C2R"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "YF",
+                                "YB"
+                            ],
+                      "material":  "Render Material",
+                      "z":  [
+                                "C2T",
+                                "TOP"
+                            ],
+                      "x":  [
+                                "XL",
+                                "XR"
+                            ]
+                  }
+              ],
+    "types":  [
+                  {
+                      "name":  "853 x 627 (42 Grant St scan)",
+                      "values":  {
+
+                                 }
+                  },
+                  {
+                      "name":  "600 x 450",
+                      "values":  {
+                                     "Depth":  450,
+                                     "Width":  600
+                                 }
+                  }
+              ],
+    "scenarios":  [
+                      {
+                          "name":  "Tall stack 1800",
+                          "values":  {
+                                         "Stack Height":  1800
+                                     }
+                      }
+                  ]
+}

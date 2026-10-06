@@ -96,6 +96,11 @@
                        {
                            "default":  6,
                            "name":  "Glass Thickness"
+                       },
+                       {
+                           "name":  "Leaf Width",
+                           "formula":  "Width - 2 * Lining Thickness",
+                           "default":  760
                        }
                    ],
     "dimensions":  [
@@ -811,6 +816,12 @@
                                 "JR"
                             ]
                   }
-              ]
+              ],
+    "swing":  {
+                  "hinge":  "JL",
+                  "strike":  "JR",
+                  "leafFace":  "LI",
+                  "direction":  -1,
+                  "parameter":  "Leaf Width"
+              }
 }
-

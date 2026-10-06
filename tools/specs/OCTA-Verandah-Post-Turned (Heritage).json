@@ -1,0 +1,337 @@
+﻿{
+    "name":  "OCTA-Verandah-Post-Turned (Heritage)",
+    "template":  "generic",
+    "category":  "Columns",
+    "folder":  "H:\\Shared drives\\OCTA\\3 Standards \u0026 Library\\1 Revit\\4 Family Development\\OCTA-Verandah-Post-Turned (Heritage)",
+    "parameters":  [
+                       {
+                           "default":  113,
+                           "name":  "Post Width"
+                       },
+                       {
+                           "default":  948,
+                           "name":  "Base Height"
+                       },
+                       {
+                           "instance":  true,
+                           "default":  2620,
+                           "name":  "Post Height"
+                       },
+                       {
+                           "kind":  "material",
+                           "name":  "Post Material"
+                       }
+                   ],
+    "planes":  [
+                   {
+                       "offset":  -56.5,
+                       "name":  "PL",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  56.5,
+                       "name":  "PR",
+                       "axis":  "x"
+                   },
+                   {
+                       "offset":  -56.5,
+                       "name":  "PF",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  56.5,
+                       "name":  "PB",
+                       "axis":  "y"
+                   },
+                   {
+                       "offset":  948,
+                       "name":  "SB",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  1951,
+                       "name":  "ST",
+                       "axis":  "z"
+                   },
+                   {
+                       "offset":  2620,
+                       "reference":  "Top",
+                       "name":  "TOP",
+                       "axis":  "z"
+                   }
+               ],
+    "dimensions":  [
+                       {
+                           "planes":  [
+                                          "PL",
+                                          "CX",
+                                          "PR"
+                                      ],
+                           "equal":  true
+                       },
+                       {
+                           "planes":  [
+                                          "PL",
+                                          "PR"
+                                      ],
+                           "parameter":  "Post Width"
+                       },
+                       {
+                           "planes":  [
+                                          "PF",
+                                          "CY",
+                                          "PB"
+                                      ],
+                           "equal":  true
+                       },
+                       {
+                           "planes":  [
+                                          "PF",
+                                          "PB"
+                                      ],
+                           "parameter":  "Post Width"
+                       },
+                       {
+                           "planes":  [
+                                          "LEVEL",
+                                          "SB"
+                                      ],
+                           "parameter":  "Base Height"
+                       },
+                       {
+                           "planes":  [
+                                          "LEVEL",
+                                          "TOP"
+                                      ],
+                           "parameter":  "Post Height"
+                       }
+                   ],
+    "boxes":  [
+                  {
+                      "y":  [
+                                "PF",
+                                "PB"
+                            ],
+                      "material":  "Post Material",
+                      "z":  [
+                                "LEVEL",
+                                "SB"
+                            ],
+                      "x":  [
+                                "PL",
+                                "PR"
+                            ]
+                  },
+                  {
+                      "y":  [
+                                "PF",
+                                "PB"
+                            ],
+                      "material":  "Post Material",
+                      "z":  [
+                                "ST",
+                                "TOP"
+                            ],
+                      "x":  [
+                                "PL",
+                                "PR"
+                            ]
+                  }
+              ],
+    "revolves":  [
+                     {
+                         "profile":  [
+                                         [
+                                             0,
+                                             0
+                                         ],
+                                         [
+                                             40.4,
+                                             0
+                                         ],
+                                         [
+                                             44.7,
+                                             15
+                                         ],
+                                         [
+                                             48.5,
+                                             30
+                                         ],
+                                         [
+                                             51.4,
+                                             60
+                                         ],
+                                         [
+                                             52.9,
+                                             75
+                                         ],
+                                         [
+                                             52.8,
+                                             90
+                                         ],
+                                         [
+                                             52.1,
+                                             105
+                                         ],
+                                         [
+                                             49.3,
+                                             120
+                                         ],
+                                         [
+                                             52.6,
+                                             135
+                                         ],
+                                         [
+                                             53.4,
+                                             150
+                                         ],
+                                         [
+                                             52.6,
+                                             165
+                                         ],
+                                         [
+                                             46.4,
+                                             180
+                                         ],
+                                         [
+                                             49.9,
+                                             210
+                                         ],
+                                         [
+                                             52.6,
+                                             225
+                                         ],
+                                         [
+                                             54.3,
+                                             240
+                                         ],
+                                         [
+                                             54.5,
+                                             255
+                                         ],
+                                         [
+                                             54.4,
+                                             270
+                                         ],
+                                         [
+                                             53.5,
+                                             285
+                                         ],
+                                         [
+                                             54.9,
+                                             300
+                                         ],
+                                         [
+                                             55.2,
+                                             315
+                                         ],
+                                         [
+                                             56.2,
+                                             330
+                                         ],
+                                         [
+                                             56.1,
+                                             345
+                                         ],
+                                         [
+                                             54.4,
+                                             360
+                                         ],
+                                         [
+                                             41.4,
+                                             750
+                                         ],
+                                         [
+                                             48.6,
+                                             765
+                                         ],
+                                         [
+                                             52.7,
+                                             780
+                                         ],
+                                         [
+                                             40.2,
+                                             795
+                                         ],
+                                         [
+                                             37,
+                                             810
+                                         ],
+                                         [
+                                             39.6,
+                                             825
+                                         ],
+                                         [
+                                             46.3,
+                                             840
+                                         ],
+                                         [
+                                             51.2,
+                                             855
+                                         ],
+                                         [
+                                             51.7,
+                                             870
+                                         ],
+                                         [
+                                             45.1,
+                                             885
+                                         ],
+                                         [
+                                             47.9,
+                                             900
+                                         ],
+                                         [
+                                             50.4,
+                                             915
+                                         ],
+                                         [
+                                             43.4,
+                                             930
+                                         ],
+                                         [
+                                             42.2,
+                                             945
+                                         ],
+                                         [
+                                             49.1,
+                                             960
+                                         ],
+                                         [
+                                             49.4,
+                                             975
+                                         ],
+                                         [
+                                             46.8,
+                                             990
+                                         ],
+                                         [
+                                             46.8,
+                                             1003
+                                         ],
+                                         [
+                                             0,
+                                             1003
+                                         ]
+                                     ],
+                         "zBase":  "SB",
+                         "material":  "Post Material"
+                     }
+                 ],
+    "types":  [
+                  {
+                      "name":  "42 Grant St turned post (Rhino/scan)",
+                      "values":  {
+
+                                 }
+                  }
+              ],
+    "scenarios":  [
+                      {
+                          "name":  "Taller post 2800",
+                          "values":  {
+                                         "Post Height":  2800
+                                     }
+                      }
+                  ]
+}

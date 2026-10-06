@@ -35,6 +35,10 @@ public static class OctaCommands
         r.Register(new ExportPointCloudPointsCommand());
         r.Register(new PlaceOpeningsBatchCommand());
         r.Register(new ImportMeshDirectShapeCommand());
+        r.Register(new CreateProfileFamilyCommand());
+        r.Register(new CreateWallSweepCommand());
+        r.Register(new CreateFootprintRoofCommand());
+        r.Register(new CreateRoofEdgeCommand());
         r.Register(new ListPhaseFiltersCommand());
         r.Register(new CreatePhaseFilterCommand());
         r.Register(new SetElementPhaseCommand());

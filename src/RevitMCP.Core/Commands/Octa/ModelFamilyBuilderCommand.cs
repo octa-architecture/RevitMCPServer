@@ -99,6 +99,7 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                 }
             }
             var boxes = new List<(GenericForm form, PlaneRef[] x, PlaneRef[] y, PlaneRef[] z, string label)>();
+            (SymbolicCurve arc, PlaneRef hinge, PlaneRef strike)? swingCheck = null;
 
             using (var t = new Transaction(fam, "Build family"))
             {
@@ -324,6 +325,64 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                 }
                 fam.Regenerate();
 
+                // Revolves (turned posts, finials, pots, pipes): profile [[r,z],...] mm about a vertical
+                // axis at center [xPlane, yPlane] (default CX/CY), z from zBase plane (default LEVEL).
+                // Fixed geometry (not flexed) — heritage profiles are traced, not parametric.
+                stage = "revolves";
+                foreach (var node in p["revolves"] as JsonArray ?? new JsonArray())
+                {
+                    if (node is not JsonObject o) continue;
+                    var cxName = (o["center"] as JsonArray)?[0]?.GetValue<string>() ?? "CX";
+                    var cyName = (o["center"] as JsonArray)?[1]?.GetValue<string>() ?? "CY";
+                    double cx = Get(planes, cxName).Position, cy = Get(planes, cyName).Position;
+                    double zb = Get(planes, P.StrOrNull(o, "zBase") ?? "LEVEL").Position;
+                    var prof = P.Arr(o, "profile").Select(n => (JsonArray)n!)
+                        .Select(a => new XYZ(cx + P.DblFrom(a[0], "r") * Mm, cy, zb + P.DblFrom(a[1], "z") * Mm)).ToList();
+                    var loop = new CurveArray();
+                    for (int i = 0; i < prof.Count; i++)
+                    {
+                        var a = prof[i]; var b = prof[(i + 1) % prof.Count];
+                        if (a.DistanceTo(b) > fam.Application.ShortCurveTolerance) loop.Append(Line.CreateBound(a, b));
+                    }
+                    var arr = new CurveArrArray(); arr.Append(loop);
+                    var sk = SketchPlane.Create(fam, Plane.CreateByNormalAndOrigin(XYZ.BasisY, new XYZ(cx, cy, zb)));
+                    var axis = Line.CreateBound(new XYZ(cx, cy, zb), new XYZ(cx, cy, zb + 1));
+                    var rev = fam.FamilyCreate.NewRevolution(true, arr, sk, axis, 0, 2 * Math.PI);
+                    if (P.StrOrNull(o, "material") is { } mat2 && famParams.TryGetValue(mat2, out var mp2))
+                        mgr.AssociateElementParameterToFamilyParameter(rev.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM), mp2);
+                }
+
+                // Door swing in plan: leaf line on the hinge plane + 90° arc, radius labelled with the
+                // leaf-width parameter so it follows the type width. { hinge, strike, leafFace, direction (+1/-1), parameter }
+                if (p["swing"] is JsonObject sw)
+                {
+                    stage = "swing";
+                    var hinge = Get(planes, P.Str(sw, "hinge")); var strike = Get(planes, P.Str(sw, "strike"));
+                    var face = Get(planes, P.Str(sw, "leafFace"));
+                    double dir = P.DblOr(sw, "direction", -1) >= 0 ? 1 : -1;
+                    double hx = hinge.Position, sx = strike.Position, fy = face.Position, rad = Math.Abs(sx - hx);
+                    var sk = SketchPlane.Create(fam, Plane.CreateByNormalAndOrigin(XYZ.BasisZ, XYZ.Zero));
+                    var c0 = new XYZ(hx, fy, 0);
+                    var open = new XYZ(hx, fy + dir * rad, 0);
+                    var shut = new XYZ(sx, fy, 0);
+                    var mid = c0 + ((shut - c0).Normalize() + (open - c0).Normalize()).Normalize() * rad;
+                    var leaf = fam.FamilyCreate.NewSymbolicCurve(Line.CreateBound(c0, open), sk);
+                    var arc = fam.FamilyCreate.NewSymbolicCurve(Arc.Create(shut, open, mid), sk);
+                    fam.Regenerate();
+                    try { fam.FamilyCreate.NewAlignment(plan, hinge.GetReference(), leaf.GeometryCurve.Reference); }
+                    catch (Exception ex) { warnings.Add("swing: couldn't lock leaf line: " + ex.Message); }
+                    if (P.StrOrNull(sw, "parameter") is { } swp && famParams.TryGetValue(swp, out var swParam))
+                    {
+                        try
+                        {
+                            var rd = fam.FamilyCreate.NewRadialDimension(plan, arc.GeometryCurve.Reference, mid);
+                            rd.FamilyLabel = swParam;
+                        }
+                        catch (Exception ex) { warnings.Add("swing: couldn't label the arc radius: " + ex.Message); }
+                    }
+                    swingCheck = (arc, hinge, strike);
+                }
+
                 stage = "face locks";
                 // Lock every face to its plane: side faces in plan, top/bottom in the front elevation.
                 foreach (var (form, xs, ys, zs, label) in boxes)
@@ -419,6 +478,13 @@ public sealed class CreateModelFamilyCommand : IRevitCommand
                         Expect("back", bb.Max.Y, Math.Max(ys[0].Position, ys[1].Position));
                         Expect("bottom", bb.Min.Z, Math.Min(zs[0].Position, zs[1].Position));
                         Expect("top", bb.Max.Z, Math.Max(zs[0].Position, zs[1].Position));
+                    }
+                    // Swing: arc radius must equal the leaf width and its centre must sit on the hinge.
+                    if (swingCheck is { } sc && sc.arc.GeometryCurve is Arc a)
+                    {
+                        double want = Math.Abs(sc.strike.Position - sc.hinge.Position);
+                        if (Math.Abs(a.Radius - want) > Tol) errs.Add($"swing radius off by {Math.Round((a.Radius - want) / Mm, 1)} mm");
+                        if (Math.Abs(a.Center.X - sc.hinge.Position) > Tol) errs.Add($"swing centre off the hinge by {Math.Round((a.Center.X - sc.hinge.Position) / Mm, 1)} mm");
                     }
                     return errs;
                 }
