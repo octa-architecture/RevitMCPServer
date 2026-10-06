@@ -162,6 +162,28 @@ export function registerOctaRevitTools(
   tool("octa_list_internal_notes", "List all internal notes (text, view, hidden state). Run before issuing drawings.",
     { viewId: z.number().int().optional() }, fwd("octa_list_internal_notes"));
 
+  // ── Family builder ───────────────────────────────────────────────────────
+  tool("revit_create_detail_family",
+    "Build a PARAMETRIC 2D detail item family (.rfa) from a spec: reference planes, labelled dimensions, lines whose " +
+    "ends sit on plane crossings (each line and end is locked), yes/no visibility, and types. Every type is flexed and " +
+    "every line end checked; nothing is saved unless all pass. Saves to the OCTA Family Development folder and loads it. " +
+    "Built-in planes: 'CV' (vertical, X=0) and 'CH' (horizontal, Y=0). Lengths in mm. Check the library first.",
+    {
+      name: z.string().describe("e.g. 'OCTA-Detail-Angle'"),
+      lineBased: z.boolean().optional(),
+      folder: z.string().optional(),
+      load: z.boolean().optional(),
+      parameters: z.array(z.object({ name: z.string(), kind: z.enum(["length", "yesno"]).optional(),
+        instance: z.boolean().optional(), default: z.union([z.number(), z.boolean()]).optional() })).optional(),
+      planes: z.array(z.object({ name: z.string(), axis: z.enum(["vertical", "horizontal"]), offset: z.number() })),
+      dimensions: z.array(z.object({ planes: z.array(z.string()).min(2), parameter: z.string().optional(),
+        equal: z.boolean().optional() })).optional(),
+      lines: z.array(z.object({ from: z.tuple([z.string(), z.string()]), to: z.tuple([z.string(), z.string()]),
+        visibleIf: z.string().optional(), style: z.string().optional() })).min(1),
+      types: z.array(z.object({ name: z.string(), values: z.record(z.union([z.number(), z.boolean()])).optional() })).optional(),
+      dryRun,
+    }, fwdWrite("create_detail_family"));
+
   // ── Phasing ──────────────────────────────────────────────────────────────
   tool("revit_list_phase_filters", "List phase filters and how each shows New / Existing / Demolished / Temporary.",
     {}, fwd("list_phase_filters"));
