@@ -160,12 +160,16 @@ public sealed class CreateFootprintRoofCommand : IRevitCommand
         }
         var ca = new CurveArray();
         for (int i = 0; i < pts.Count; i++) ca.Append(Line.CreateBound(pts[i], pts[(i + 1) % pts.Count]));
-        FootPrintRoof roof; ModelCurveArray map;
+        // Revit 2027's wrapper null-checks the incoming mapping array even though it's an out
+        // parameter, so it must be allocated before the call.
+        FootPrintRoof roof; ModelCurveArray map = new ModelCurveArray();
         try { roof = doc.Create.NewFootPrintRoof(ca, level, rt, out map); }
         catch (Exception ex)
         {
+            var pn = ex is ArgumentNullException ane ? ane.ParamName : (ex as Autodesk.Revit.Exceptions.ArgumentException)?.ParamName;
+            var frame = ex.StackTrace?.Split('\n').FirstOrDefault()?.Trim();
             throw new RevitCommandException("command_failed",
-                $"NewFootPrintRoof failed ({ex.Message}); type '{rt?.Name}' ({rt?.Id.Value}), level '{level.Name}', {pts.Count} edges.");
+                $"NewFootPrintRoof failed ({ex.GetType().Name}: {ex.Message}; param '{pn}'; at {frame}); type '{rt?.Name}' ({rt?.Id.Value}), level '{level.Name}' (elev {level.Elevation:0.###} ft, proj {level.ProjectElevation:0.###}), {pts.Count} edges, active view '{ctx.App.ActiveUIDocument?.ActiveView?.Name}'.");
         }
         if (roof is null || map is null) throw new RevitCommandException("command_failed", "Revit returned no roof.");
         var slopes = p["slopes"] as JsonArray;
