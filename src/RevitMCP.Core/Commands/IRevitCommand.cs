@@ -75,5 +75,12 @@ public interface IRevitCommand
     /// </summary>
     bool SuppressWarningsOnCommit => false;
 
+    /// <summary>
+    /// For bulk-creation commands: at commit, delete warnings AND apply Revit's default resolution
+    /// to errors (usually deleting just the offending element) instead of rolling back the whole
+    /// batch. Every resolved failure is reported in the response's <c>commitResolved</c> field.
+    /// </summary>
+    bool ResolveErrorsOnCommit => false;
+
     JsonNode? Execute(CommandContext ctx);
 }

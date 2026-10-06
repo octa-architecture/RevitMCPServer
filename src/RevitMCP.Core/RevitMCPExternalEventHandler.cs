@@ -209,6 +209,14 @@ public sealed class RevitMCPExternalEventHandler : IExternalEventHandler
         var doc = ctx.RequireDoc();
         using var tx = new Transaction(doc, $"MCP: {commandName}");
         if (command.SuppressWarningsOnCommit) SuppressCommitWarnings(tx);
+        CommitErrorResolver? resolver = null;
+        if (command.ResolveErrorsOnCommit)
+        {
+            resolver = new CommitErrorResolver();
+            var fo = tx.GetFailureHandlingOptions();
+            fo.SetFailuresPreprocessor(resolver);
+            tx.SetFailureHandlingOptions(fo);
+        }
         try
         {
             tx.Start();
@@ -229,6 +237,8 @@ public sealed class RevitMCPExternalEventHandler : IExternalEventHandler
             if (tx.HasStarted() && !tx.HasEnded())
                 status = tx.Commit();
 
+            if (resolver is { Messages.Count: > 0 } && data is JsonObject withResolved)
+                withResolved["commitResolved"] = new JsonArray(resolver.Messages.Select(m => (JsonNode)JsonValue.Create(m)!).ToArray());
             var envelope = JsonResult.Success(data);
             if (data is not JsonObject obj) return envelope;
 
@@ -667,6 +677,33 @@ public sealed class RevitMCPExternalEventHandler : IExternalEventHandler
         {
             accessor.DeleteAllWarnings();
             return FailureProcessingResult.Continue;
+        }
+    }
+
+    /// <summary>Deletes warnings and applies Revit's default resolution to errors, recording each.</summary>
+    private sealed class CommitErrorResolver : IFailuresPreprocessor
+    {
+        public List<string> Messages { get; } = new();
+
+        public FailureProcessingResult PreprocessFailures(FailuresAccessor accessor)
+        {
+            bool resolvedAny = false;
+            foreach (var f in accessor.GetFailureMessages())
+            {
+                var ids = string.Join(",", f.GetFailingElementIds().Select(i => i.Value));
+                if (f.GetSeverity() == FailureSeverity.Warning)
+                {
+                    Messages.Add($"warning: {f.GetDescriptionText()} [{ids}]");
+                    accessor.DeleteWarning(f);
+                }
+                else if (f.HasResolutions())
+                {
+                    Messages.Add($"error resolved ({f.GetDefaultResolutionCaption()}): {f.GetDescriptionText()} [{ids}]");
+                    accessor.ResolveFailure(f);
+                    resolvedAny = true;
+                }
+            }
+            return resolvedAny ? FailureProcessingResult.ProceedWithCommit : FailureProcessingResult.Continue;
         }
     }
 

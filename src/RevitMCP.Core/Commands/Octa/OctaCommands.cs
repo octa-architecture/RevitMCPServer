@@ -25,6 +25,13 @@ public static class OctaCommands
         r.Register(new OpenDocumentCommand());
         r.Register(new ExitRevitCommand());
         r.Register(new SaveDocumentCommand());
+        r.Register(new CloseDocumentCommand());
+        r.Register(new CopyFromDocumentCommand());
+        r.Register(new PurgeUnusedCommand());
+        r.Register(new CreateMassCommand());
+        r.Register(new CreateMassSurfaceCommand());
+        r.Register(new CreateWallsBatchCommand());
+        r.Register(new CreateRoomsAndFloorsCommand());
         r.Register(new ListPhaseFiltersCommand());
         r.Register(new CreatePhaseFilterCommand());
         r.Register(new SetElementPhaseCommand());

@@ -270,7 +270,7 @@ export function registerOctaRevitTools(
   tool("revit_convert_coordinates", "Convert [[x,y,z]] metres between internal and shared (survey) coordinates — use to prove survey placement against TBMs.",
     { points: z.array(z.array(z.number()).min(2)).min(1), toShared: z.boolean().optional() }, fwd("convert_coordinates"));
   tool("revit_sample_point_cloud_grid", "Sample a point cloud into a grid of [x,y,z] points (median or min height per cell) within a box (metres).",
-    { instanceId: z.number().int(), minM: pt, maxM: pt, cellM: z.number().optional(), stat: z.enum(["median", "min"]).optional(),
+    { instanceId: z.number().int(), minM: pt, maxM: pt, cellM: z.number().optional(), stat: z.string().optional().describe("median (default) | min | max | pNN percentile, e.g. p95 for roof tops"),
       maxPointsPerCall: z.number().int().optional() }, fwd("sample_point_cloud_grid"));
   tool("revit_create_toposolid", "Create a toposolid from [x,y,z] points in metres (absolute heights).",
     { points: z.array(z.array(z.number()).min(3)).min(3), typeName: z.string().optional(), levelName: z.string().optional(),
@@ -282,6 +282,50 @@ export function registerOctaRevitTools(
     { points: z.array(z.object({ name: z.string().optional(), x: z.number(), y: z.number(), rl: z.number() })).min(1),
       toleranceMm: z.number().optional(), elementIds: z.array(z.number().int()).optional(),
       viewId: z.number().int().optional().describe("3D view to cast in (default: first 3D view without a section box).") }, fwd("survey_check"));
+
+  tool("revit_create_mass",
+    "Context massing (neighbours, outbuildings) as a DirectShape: footprint [[x,y]] (m, internal) extruded from baseZ to topZ (absolute RLs from the survey), optional gable/skillion roof to ridgeZ. Run revit_survey_check style checks against the surveyed RLs afterwards.",
+    { points: z.array(z.array(z.number()).length(2)).min(3), baseZ: z.number(), topZ: z.number(), name: z.string(),
+      roof: z.object({ type: z.enum(["gable", "skillion"]), ridgeZ: z.number(), axis: z.enum(["x", "y"]).optional(),
+        lowSide: z.enum(["n", "s", "e", "w"]).optional() }).optional(),
+      category: z.enum(["Mass", "Generic Models"]).optional(), phase: z.string().optional(), comments: z.string().optional(), dryRun },
+    fwdWrite("create_mass"));
+
+  tool("revit_create_mass_surface",
+    "Survey-exact context mass: footprint outline [[x,y,z]] (z = eave/parapet RL at each vertex) and interior roofPoints [[x,y,z]] (ridges etc.) are triangulated into the roof so every surveyed RL lies on the model; walls drop to baseZ. Metres, internal coordinates.",
+    { outline: z.array(z.array(z.number()).length(3)).min(3), roofPoints: z.array(z.array(z.number()).length(3)).optional(),
+      baseZ: z.number(), name: z.string(), category: z.enum(["Mass", "Generic Models"]).optional(), phase: z.string().optional(),
+      comments: z.string().optional(), dryRun }, fwdWrite("create_mass_surface"));
+
+  tool("revit_create_walls_batch",
+    "Model surveyed (existing) walls in one call: centrelines with surveyed thickness and top RL (metres, internal). Makes 'EX - Wall NNN' types per thickness. Phase defaults to Existing.",
+    { walls: z.array(z.object({ x1: z.number(), y1: z.number(), x2: z.number(), y2: z.number(), thicknessMm: z.number(),
+        topRL: z.number(), baseRL: z.number().optional(), comments: z.string().optional() })).min(1),
+      levelName: z.string(), phase: z.string().optional(), typePrefix: z.string().optional(), baseTypeName: z.string().optional(),
+      roundMm: z.number().optional(), dryRun }, fwdWrite("create_walls_batch"));
+
+  tool("revit_create_rooms_and_floors",
+    "Rooms + floors from surveyed floor levels: each point {x,y,ffl,name?} (metres, internal) inside an enclosed wall circuit becomes a room, and a floor with its top at exactly the surveyed FFL. Phase defaults to Existing.",
+    { points: z.array(z.object({ x: z.number(), y: z.number(), ffl: z.number(), name: z.string().optional() })).min(1),
+      levelName: z.string(), phase: z.string().optional(), floorTypeName: z.string().optional(), makeFloors: z.boolean().optional(),
+      closeGapsM: z.number().optional().describe("Bridge door/window gaps up to this width with room separation lines (default 1.5)"),
+      replace: z.boolean().optional().describe("Clear this level's rooms, separation lines and phase floors from a previous run first"), dryRun },
+    fwdWrite("create_rooms_and_floors"));
+
+  // ── Template / standards ─────────────────────────────────────────────────
+  const namesOrAll = z.union([z.array(z.string()), z.literal("all")]).optional();
+  tool("revit_copy_from_document",
+    "Copy OCTA standards (view templates, filled region types, text/dimension types, families, drafting/legend/schedule views) from another model into the active one. Skips names that already exist. Use preview=true first.",
+    { sourcePath: z.string(), viewTemplates: namesOrAll, filledRegionTypes: namesOrAll, textNoteTypes: namesOrAll,
+      dimensionTypes: namesOrAll, families: z.array(z.string()).optional(), familyCategories: z.array(z.string()).optional(),
+      views: z.array(z.string()).optional(), preview: z.boolean().optional(), closeSource: z.boolean().optional() },
+    fwd("copy_from_document"));
+  tool("revit_purge_unused",
+    "Purge unused content (keeps title blocks, annotation families, detail items, profiles, views/templates). Preview by default; apply=true deletes. Confirm with the user before applying on a project.",
+    { apply: z.boolean().optional(), keepCategories: z.array(z.string()).optional(), keepNames: z.array(z.string()).optional(),
+      passes: z.number().int().optional() }, fwdWrite("purge_unused"));
+  tool("revit_close_document", "Close an open, non-active document without saving.",
+    { path: z.string().optional(), title: z.string().optional() }, fwd("close_document"));
 
   // ── Phasing ──────────────────────────────────────────────────────────────
   tool("revit_list_phase_filters", "List phase filters and how each shows New / Existing / Demolished / Temporary.",

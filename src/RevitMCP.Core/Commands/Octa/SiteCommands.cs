@@ -276,7 +276,9 @@ public sealed class SamplePointCloudGridCommand : IRevitCommand
         var min = OctaUtil.PointParam(p, "minM", ft);
         var max = OctaUtil.PointParam(p, "maxM", ft);
         var cell = P.DblOr(p, "cellM", 0.5) * ft;
-        var useMin = (P.StrOrNull(p, "stat") ?? "median").ToLowerInvariant() == "min";
+        // stat: median (default) | min | max | pNN (percentile, e.g. p95 = roof tops without stray high points)
+        var stat = (P.StrOrNull(p, "stat") ?? "median").ToLowerInvariant();
+        double pct = stat switch { "min" => 0, "max" => 100, "median" => 50, _ when stat.StartsWith("p") && double.TryParse(stat[1..], out var v) => v, _ => 50 };
 
         var tf = inst.GetTotalTransform();
         var inv = tf.Inverse;
@@ -329,7 +331,7 @@ public sealed class SamplePointCloudGridCommand : IRevitCommand
         {
             if (kv.Value.Count < 3) continue;
             kv.Value.Sort();
-            var z = useMin ? kv.Value[0] : kv.Value[kv.Value.Count / 2];
+            var z = kv.Value[(int)Math.Round((kv.Value.Count - 1) * pct / 100.0)];
             double x = min.X + (kv.Key.Item1 + 0.5) * cell, y = min.Y + (kv.Key.Item2 + 0.5) * cell;
             outPts.Add(new JsonArray(Math.Round(x * P.FeetToMeters, 3), Math.Round(y * P.FeetToMeters, 3), Math.Round(z * P.FeetToMeters, 3)));
         }

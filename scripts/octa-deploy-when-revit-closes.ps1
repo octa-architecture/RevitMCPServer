@@ -37,10 +37,19 @@ function Call-Addin([string]$command, [hashtable]$params) {
 
 $reopenPaths = @()
 if ($OpenModel) { $reopenPaths = @($OpenModel) }
+# Never close Revit for a bundle that isn't there (e.g. a failed build).
+if (-not (Get-ChildItem "$Bundle\addin\*\RevitMCP*.dll" -ErrorAction SilentlyContinue)) {
+    Write-Host "No built add-in in $Bundle - build first. Revit left running."; exit 1
+}
 if ($CloseRevit -and (Get-Process -Name Revit -ErrorAction SilentlyContinue)) {
     try {
         $docs = Call-Addin "list_open_documents" @{}
-        $reopenPaths = @($docs.data.documents | Where-Object { $_.path } | ForEach-Object { $_.path })
+        # -OpenModel wins; otherwise reopen the ACTIVE document first (background documents,
+        # e.g. a copy source, must not take its place).
+        if (-not $OpenModel) {
+            $reopenPaths = @($docs.data.documents | Where-Object { $_.path } |
+                Sort-Object { -not $_.isActive } | ForEach-Object { $_.path })
+        }
         $r = Call-Addin "exit_revit" @{ save = [bool]$Save }
         if (-not $r.ok) { Write-Host "Revit refused to exit: $($r.error.message)"; exit 3 }
         Write-Host "[$(Get-Date -Format T)] Asked Revit to exit (saved: $($r.data.saved -join ', '))"
