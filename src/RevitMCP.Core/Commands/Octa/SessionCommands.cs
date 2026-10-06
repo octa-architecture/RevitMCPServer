@@ -63,6 +63,39 @@ public sealed class OpenDocumentCommand : IRevitCommand
 }
 
 /// <summary>
+/// Save the active document, or save it as a new file. Params: saveAsPath? (new .rvt path),
+/// overwrite? (false). Ask the user before saving a live project model; test models are fine.
+/// </summary>
+public sealed class SaveDocumentCommand : IRevitCommand
+{
+    public string Name => "save_document";
+    public bool IsReadOnly => false;
+    public string RiskLevel => "high";
+    public ExecutionKind Execution => ExecutionKind.UiAction;
+
+    public JsonNode? Execute(CommandContext ctx)
+    {
+        var doc = ctx.App.ActiveUIDocument?.Document
+            ?? throw new RevitCommandException("not_found", "No active document.");
+        if (doc.IsWorkshared)
+            throw new RevitCommandException("unsupported", $"'{doc.Title}' is workshared; synchronise it in Revit.");
+        if (P.StrOrNull(ctx.Parameters, "saveAsPath") is { } path)
+        {
+            if (File.Exists(path) && !P.BoolOr(ctx.Parameters, "overwrite", false))
+                throw new RevitCommandException("conflict", $"{path} exists; pass overwrite=true to replace it.");
+            doc.SaveAs(path, new SaveAsOptions { OverwriteExistingFile = true });
+        }
+        else
+        {
+            if (string.IsNullOrEmpty(doc.PathName))
+                throw new RevitCommandException("bad_request", $"'{doc.Title}' has never been saved; pass saveAsPath.");
+            doc.Save();
+        }
+        return new JsonObject { ["saved"] = true, ["title"] = doc.Title, ["path"] = doc.PathName };
+    }
+}
+
+/// <summary>
 /// Save (optionally) and exit Revit cleanly. Refuses when a document has unsaved changes and
 /// save=false, so work is never thrown away silently. Params: save (bool, required).
 /// Revit exits just after this call returns.

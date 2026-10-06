@@ -100,4 +100,9 @@ export function registerOctaSessionTools(tool: ToolFn): void {
   tool("revit_open_document", "Open a .rvt/.rfa in the running Revit and make it active.",
     { path: z.string(), audit: z.boolean().optional() },
     async (p) => envelopeToToolResult(await callRevit("open_document", p)));
+
+  tool("revit_save_document",
+    "Save the active document (or save it as a new .rvt). Ask the user first for a live project model; test models are fine.",
+    { saveAsPath: z.string().optional(), overwrite: z.boolean().optional() },
+    async (p) => envelopeToToolResult(await callRevit("save_document", p)));
 }

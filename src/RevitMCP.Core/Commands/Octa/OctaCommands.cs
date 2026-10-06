@@ -24,6 +24,7 @@ public static class OctaCommands
         r.Register(new ListOpenDocumentsCommand());
         r.Register(new OpenDocumentCommand());
         r.Register(new ExitRevitCommand());
+        r.Register(new SaveDocumentCommand());
         r.Register(new ListPhaseFiltersCommand());
         r.Register(new CreatePhaseFilterCommand());
         r.Register(new SetElementPhaseCommand());
